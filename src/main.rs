@@ -62,7 +62,7 @@ fn main() -> ! {
     ];
 
     // set up the list of displays.
-    let mut current_display_index = 0;
+    let mut current_display_index: usize = 0;
     let display_list = [h_view, s_view, v_view];
 
     // initialize the display
@@ -71,13 +71,19 @@ fn main() -> ! {
     // loop
     loop {
         // move to the next state
+        // if doing so causes the index to be 3 or more, wrap back to index 0 (H)
         if forward_button.is_low().unwrap() && current_display_index < 2 {
             current_display_index += 1;
+        } else if forward_button.is_low().unwrap() && current_display_index == 2 {
+            current_display_index = 0;
         }
 
         // move to the previous state
+        // if doing so causes the index to become negative, wrap back to 2 (V)
         if back_button.is_low().unwrap() && current_display_index > 0 {
             current_display_index -= 1;
+        } else if back_button.is_low().unwrap() && current_display_index == 0 {
+            current_display_index = 2;
         }
 
         // show the current display based on the index.
