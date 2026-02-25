@@ -14,11 +14,20 @@ use cortex_m_rt::entry;
 
 // Microbit crate
 // docs: https://docs.rs/microbit-v2/0.16.0/microbit/
-use microbit::{board::Board, display::blocking::Display, hal::Timer};
+use microbit::{
+    board::Board,
+    display::blocking::Display,
+    hal::{Timer, gpio::Level}, // used for controlling LED brightness
+};
 
-// embedded-hal crate: For button state
+// embedded-hal crate: For button and LED pin state
 // https://docs.rs/embedded-hal/1.0.0/embedded_hal/
-use embedded_hal::digital::InputPin;
+use embedded_hal::digital::{InputPin, OutputPin};
+
+// hsv crate for converting HSV to RGB
+// https://github.com/pdx-cs-rust-embedded/hsv
+// https://pdx-cs-rust-embedded.github.io/hsv/hsv/index.html
+// use hsv::Hsv;
 
 // =======================================================
 
@@ -33,6 +42,19 @@ fn main() -> ! {
     // Initialize the buttons
     let mut back_button = board.buttons.button_a; // right to left: H < S < V
     let mut forward_button = board.buttons.button_b; // left to right: H > S > V
+
+    // initialize the display
+    let mut display = Display::new(board.display_pins);
+
+    // initialize the LED pins
+    // inspired by https://github.com/pdx-cs-rust-embedded/hello-rgb/tree/pwm
+    // https://docs.rs/microbit-v2/0.16.0/microbit/hal/gpio/p0/struct.P0_10.html#method.into_push_pull_output
+    // https://docs.rs/microbit-v2/0.16.0/microbit/hal/gpio/struct.Pin.html
+    let pin_r = board.edge.e08.into_push_pull_output(Level::Low); // Red goes into P8
+    let pin_g = board.edge.e09.into_push_pull_output(Level::Low); // Green goes into P9
+    let pin_b = board.edge.e16.into_push_pull_output(Level::Low); // Blue goes into P16
+
+    let mut color_pins = [pin_r.degrade(), pin_g.degrade(), pin_b.degrade()]; // set up the list of pins and use them as generic structs
 
     // define the three displays for H, S, and V
     // default starting display is H (Hue)
@@ -65,9 +87,6 @@ fn main() -> ! {
     let mut current_display_index: usize = 0;
     let display_list = [h_view, s_view, v_view];
 
-    // initialize the display
-    let mut display = Display::new(board.display_pins);
-
     // loop
     loop {
         // move to the next state
@@ -85,6 +104,20 @@ fn main() -> ! {
         } else if back_button.is_low().unwrap() && current_display_index == 0 {
             current_display_index = 2;
         }
+
+        // *** TBD ***
+
+        // turn off the led
+        for pin in color_pins.iter_mut() {
+            pin.set_high().unwrap();
+        }
+
+        // test code - turn on the LED and show a red color
+        color_pins[0].set_low().unwrap(); // R
+        color_pins[1].set_high().unwrap(); // G
+        color_pins[2].set_high().unwrap(); // B
+
+        // *** End of TBD section ***
 
         // show the current display based on the index.
         rprintln!("{}", current_display_index);
