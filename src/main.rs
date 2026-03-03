@@ -17,7 +17,11 @@ use cortex_m_rt::entry;
 use microbit::{
     board::Board,
     display::blocking::Display,
-    hal::{Timer, gpio::Level}, // used for controlling LED brightness
+    hal::{
+        Timer, 
+        gpio::Level, 
+        saadc::{Saadc, SaadcConfig}
+    }, // used for controlling LED brightness
 };
 
 // embedded-hal crate: For button and LED pin state
@@ -27,7 +31,7 @@ use embedded_hal::digital::{InputPin, OutputPin};
 // hsv crate for converting HSV to RGB
 // https://github.com/pdx-cs-rust-embedded/hsv
 // https://pdx-cs-rust-embedded.github.io/hsv/hsv/index.html
-// use hsv::Hsv;
+use hsv::Hsv;
 
 // =======================================================
 
@@ -35,16 +39,30 @@ use embedded_hal::digital::{InputPin, OutputPin};
 fn main() -> ! {
     rtt_init_print!();
 
+    // Define the max potentiometer value.
+    // It is about (2^14) - 1
+    const MAX_POT_VALUE: f32 = 16383.0;
+
     // initialize the board and timer
     let board = Board::take().unwrap();
     let mut timer = Timer::new(board.TIMER0);
 
+    // Enable timer interrupts
+    timer.enable_interrupt();
+    
     // Initialize the buttons
     let mut back_button = board.buttons.button_a; // right to left: H < S < V
     let mut forward_button = board.buttons.button_b; // left to right: H > S > V
-
+    
     // initialize the display
     let mut display = Display::new(board.display_pins);
+    
+    // initialize the SAADC 
+    // Docs: https://docs.rs/microbit-v2/0.16.0/microbit/hal/saadc/index.html
+    let saadc_config = SaadcConfig::default();
+    let mut saadc = Saadc::new(board.ADC, saadc_config);
+    let mut saadc_pin = board.edge.e02.into_floating_input(); // For the rotary device, the other pins are for ground and 3.3V
+    
 
     // initialize the LED pins
     // inspired by https://github.com/pdx-cs-rust-embedded/hello-rgb/tree/pwm
@@ -87,8 +105,28 @@ fn main() -> ! {
     let mut current_display_index: usize = 0;
     let display_list = [h_view, s_view, v_view];
 
+    // set up the list of HSV values to convert to RGB
+    let mut hsv_values = Hsv {
+        h: 1.0, 
+        s: 1.0, 
+        v: 1.0
+    };
+
     // loop
     loop {
+        // turn off the led
+        for pin in color_pins.iter_mut() {
+            pin.set_high().unwrap();
+        }
+
+        // Read the potentiometer value and scale it to be between 0 and 1
+        let potentiometer_res = saadc.read_channel(&mut saadc_pin).unwrap();
+        let mut pot_val: f32 = potentiometer_res.into();
+        pot_val /= MAX_POT_VALUE;
+
+        // clamp the potentiometer value between 0 and 1
+        pot_val = pot_val.clamp(0.0, 1.0);
+        
         // move to the next state
         // if doing so causes the index to be 3 or more, wrap back to index 0 (H)
         if forward_button.is_low().unwrap() && current_display_index < 2 {
@@ -96,7 +134,7 @@ fn main() -> ! {
         } else if forward_button.is_low().unwrap() && current_display_index == 2 {
             current_display_index = 0;
         }
-
+        
         // move to the previous state
         // if doing so causes the index to become negative, wrap back to 2 (V)
         if back_button.is_low().unwrap() && current_display_index > 0 {
@@ -105,22 +143,27 @@ fn main() -> ! {
             current_display_index = 2;
         }
 
-        // *** TBD ***
-
-        // turn off the led
-        for pin in color_pins.iter_mut() {
-            pin.set_high().unwrap();
+        // determine which value to update based on index.
+        if current_display_index == 0 {
+            hsv_values.h = pot_val;
+        } 
+        else if current_display_index == 1 {
+            hsv_values.s = pot_val;
+        }
+        else if current_display_index == 2 {
+            hsv_values.v = pot_val;
         }
 
-        // test code - turn on the LED and show a red color
-        color_pins[0].set_low().unwrap(); // R
-        color_pins[1].set_high().unwrap(); // G
-        color_pins[2].set_high().unwrap(); // B
+        rprintln!("HSV values: {} {} {}", hsv_values.h,hsv_values.s, hsv_values.v);
+        // Convert HSV to RGB
+        let rgb_values = hsv_values.to_rgb();
 
-        // *** End of TBD section ***
+        // test code - turn on the LED and show a different color when the mode is changed
+        color_pins[current_display_index].set_low().unwrap();
+
+        rprintln!("RGB values: {} {} {}", rgb_values.r, rgb_values.g, rgb_values.b);
 
         // show the current display based on the index.
-        rprintln!("{}", current_display_index);
         display.show(&mut timer, display_list[current_display_index], 100);
     }
 }
