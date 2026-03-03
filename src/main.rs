@@ -20,13 +20,17 @@ use microbit::{
     hal::{
         Timer,
         gpio::Level,
+        pac::pwm0,
         saadc::{Saadc, SaadcConfig},
     }, // used for controlling LED brightness
 };
 
 // embedded-hal crate: For button and LED pin state
 // https://docs.rs/embedded-hal/1.0.0/embedded_hal/
-use embedded_hal::digital::{InputPin, OutputPin};
+use embedded_hal::{
+    delay::DelayNs,
+    digital::{InputPin, OutputPin},
+};
 
 // hsv crate for converting HSV to RGB
 // https://github.com/pdx-cs-rust-embedded/hsv
@@ -34,7 +38,19 @@ use embedded_hal::digital::{InputPin, OutputPin};
 use hsv::Hsv;
 
 // =======================================================
+// Given the RGB value, determine when to turn off the LED
+fn calculate_turn_off_steps(rgb_val: f32) -> i16 {
+    let turn_off_value = rgb_val * 100.0;
+    let turn_off_value_int: i16 = turn_off_value as i16;
+    turn_off_value_int
+}
 
+// given the turn_off_value as an integer, determine when to set the timer to interrupt in us (microseconds)
+fn calculate_timer_interrupt_val_us(turn_off_val: i16) -> i16 {
+    turn_off_val * 100 // this value is in us
+}
+
+// =======================================================
 #[entry]
 fn main() -> ! {
     rtt_init_print!();
@@ -46,6 +62,7 @@ fn main() -> ! {
     // initialize the board and timer
     let board = Board::take().unwrap();
     let mut timer = Timer::new(board.TIMER0);
+    let mut pwm = board.PWM0;
 
     // Enable timer interrupts
     timer.enable_interrupt();
