@@ -1,3 +1,8 @@
+# Copyright © 2026 Lee Hoang
+#
+# [This work is made available under the "Apache 2.0 or MIT License".]
+#
+# See the file LICENSE.txt in this distribution for license terms.
 [default.general]
 chip = "nrf52833_xxAA"
 

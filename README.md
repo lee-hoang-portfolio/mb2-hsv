@@ -26,3 +26,9 @@ TBD
 - [pdx-cs-rust-embedded](https://github.com/pdx-cs-rust-embedded) - provided starting points for setting up the project.
 - [Rust Cargo book](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html) - used to specify git repo for dependencies.
 - [hsv crate documentation](https://pdx-cs-rust-embedded.github.io/hsv/hsv/index.html)
+
+## License
+
+This work is made available under the "Apache 2.0 or MIT
+License". See the file `LICENSE.txt` in this distribution for
+license terms.
