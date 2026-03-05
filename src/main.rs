@@ -93,7 +93,7 @@ fn main() -> ! {
 
     // define the three displays for H, S, and V
     // default starting display is H (Hue)
-    let h_view = [
+    const H_VIEW: [[u8; 5]; 5] = [
         // Hue
         [1u8, 0u8, 0u8, 0u8, 1u8],
         [1u8, 0u8, 0u8, 0u8, 1u8],
@@ -101,7 +101,7 @@ fn main() -> ! {
         [1u8, 0u8, 0u8, 0u8, 1u8],
         [1u8, 0u8, 0u8, 0u8, 1u8],
     ];
-    let s_view = [
+    const S_VIEW: [[u8; 5]; 5] = [
         // Saturation
         [1u8, 1u8, 1u8, 1u8, 1u8],
         [1u8, 0u8, 0u8, 0u8, 0u8],
@@ -109,7 +109,7 @@ fn main() -> ! {
         [0u8, 0u8, 0u8, 0u8, 1u8],
         [1u8, 1u8, 1u8, 1u8, 1u8],
     ];
-    let v_view = [
+    const V_VIEW: [[u8; 5]; 5] = [
         // Value
         [1u8, 0u8, 0u8, 0u8, 1u8],
         [1u8, 0u8, 0u8, 0u8, 1u8],
@@ -120,7 +120,7 @@ fn main() -> ! {
 
     // set up the list of displays.
     let mut current_display_index: usize = 0;
-    let display_list = [h_view, s_view, v_view];
+    let display_list = [H_VIEW, S_VIEW, V_VIEW];
 
     // set up the list of HSV values to convert to RGB
     let mut hsv_values = Hsv {
