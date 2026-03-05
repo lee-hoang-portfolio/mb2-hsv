@@ -20,7 +20,8 @@ use microbit::{
     hal::{
         Timer,
         gpio::Level,
-        pac::pwm0,
+        gpiote,
+        pac::{pwm0, NVIC, interrupt},
         saadc::{Saadc, SaadcConfig},
     }, // used for controlling LED brightness
 };
@@ -62,7 +63,7 @@ fn main() -> ! {
     // initialize the board and timer
     let board = Board::take().unwrap();
     let mut timer = Timer::new(board.TIMER0);
-    let mut pwm = board.PWM0;
+    //let pwm = board.PWM0;
 
     // Enable timer interrupts
     timer.enable_interrupt();
