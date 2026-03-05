@@ -52,6 +52,12 @@ fn calculate_timer_interrupt_val_us(turn_off_val: i16) -> i16 {
 }
 
 // =======================================================
+#[interrupt]
+fn GPIOTE() {
+
+}
+
+// =======================================================
 #[entry]
 fn main() -> ! {
     rtt_init_print!();
