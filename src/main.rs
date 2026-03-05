@@ -123,7 +123,7 @@ fn main() -> ! {
     let display_list = [H_VIEW, S_VIEW, V_VIEW];
 
     // set up the list of HSV values to convert to RGB
-    let mut hsv_values = Hsv {
+    let mut hsv_values: hsv::Hsv = Hsv {
         h: 1.0,
         s: 1.0,
         v: 1.0,
@@ -176,7 +176,7 @@ fn main() -> ! {
             hsv_values.v
         );
         // Convert HSV to RGB
-        let rgb_values = hsv_values.to_rgb();
+        let rgb_values: hsv::Rgb = hsv_values.to_rgb();
 
         // test code - turn on the LED and show a different color when the mode is changed
         color_pins[current_display_index].set_low().unwrap();
