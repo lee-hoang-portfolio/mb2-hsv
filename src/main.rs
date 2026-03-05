@@ -21,7 +21,7 @@ use microbit::{
         Timer,
         gpio::Level,
         gpiote,
-        pac::{pwm0, NVIC, interrupt},
+        pac::{NVIC, self, interrupt},
         saadc::{Saadc, SaadcConfig},
     }, // used for controlling LED brightness
 };
@@ -29,7 +29,7 @@ use microbit::{
 // embedded-hal crate: For button and LED pin state
 // https://docs.rs/embedded-hal/1.0.0/embedded_hal/
 use embedded_hal::{
-    delay::DelayNs,
+    //delay::DelayNs,
     digital::{InputPin, OutputPin},
 };
 
@@ -37,6 +37,10 @@ use embedded_hal::{
 // https://github.com/pdx-cs-rust-embedded/hsv
 // https://pdx-cs-rust-embedded.github.io/hsv/hsv/index.html
 use hsv::Hsv;
+
+// critical section
+// used for sharing variables between the interrupt handler and the main code
+use critical_section_lock_mut::LockMut;
 
 // =======================================================
 // Given the RGB value, determine when to turn off the LED
@@ -52,8 +56,12 @@ fn calculate_timer_interrupt_val_us(turn_off_val: i16) -> i16 {
 }
 
 // =======================================================
+// Interrupt variables - TBD
+
+// Primary interrupt function
 #[interrupt]
 fn GPIOTE() {
+    // TBD - Interrupt based on a timer
 
 }
 
@@ -69,7 +77,6 @@ fn main() -> ! {
     // initialize the board and timer
     let board = Board::take().unwrap();
     let mut timer = Timer::new(board.TIMER0);
-    //let pwm = board.PWM0;
 
     // Enable timer interrupts
     timer.enable_interrupt();
@@ -135,21 +142,20 @@ fn main() -> ! {
         v: 1.0,
     };
 
-    // loop
+    // Enable interrupts for the NVIC
+    // Requires unsafe block to run
+    unsafe {
+        NVIC::unmask(pac::Interrupt::GPIOTE)
+    };
+
+    // clear interrupt state
+    NVIC::unpend(pac::Interrupt::GPIOTE);
+    
+
+    // Main loop
     loop {
-        // turn off the led
-        for pin in color_pins.iter_mut() {
-            pin.set_high().unwrap();
-        }
-
-        // Read the potentiometer value and scale it to be between 0 and 1
-        let potentiometer_res = saadc.read_channel(&mut saadc_pin).unwrap();
-        let mut pot_val: f32 = potentiometer_res.into();
-        pot_val /= MAX_POT_VALUE;
-
-        // clamp the potentiometer value between 0 and 1
-        pot_val = pot_val.clamp(0.0, 1.0);
-
+        // ******* STEP 1: Check for button presses *******
+        
         // move to the next state
         // if doing so causes the index to be 3 or more, wrap back to index 0 (H)
         if forward_button.is_low().unwrap() && current_display_index < 2 {
@@ -157,7 +163,7 @@ fn main() -> ! {
         } else if forward_button.is_low().unwrap() && current_display_index == 2 {
             current_display_index = 0;
         }
-
+        
         // move to the previous state
         // if doing so causes the index to become negative, wrap back to 2 (V)
         if back_button.is_low().unwrap() && current_display_index > 0 {
@@ -166,6 +172,18 @@ fn main() -> ! {
             current_display_index = 2;
         }
 
+        
+
+        // ******* STEP 2: Read potentiometer value *******
+        
+        // Read the potentiometer value and scale it to be between 0 and 1
+        let potentiometer_res = saadc.read_channel(&mut saadc_pin).unwrap();
+        let mut pot_val: f32 = potentiometer_res.into();
+        pot_val /= MAX_POT_VALUE;
+        
+        // clamp the potentiometer value between 0 and 1
+        pot_val = pot_val.clamp(0.0, 1.0);
+        
         // determine which value to update based on index.
         if current_display_index == 0 {
             hsv_values.h = pot_val;
@@ -174,19 +192,28 @@ fn main() -> ! {
         } else if current_display_index == 2 {
             hsv_values.v = pot_val;
         }
-
+        
         rprintln!(
             "HSV values: {} {} {}",
             hsv_values.h,
             hsv_values.s,
             hsv_values.v
         );
+
+
+        // ******* STEP 3: Convert HSV values to RGB *******
+
         // Convert HSV to RGB
         let rgb_values: hsv::Rgb = hsv_values.to_rgb();
 
+        // turn off the led
+        for pin in color_pins.iter_mut() {
+            pin.set_high().unwrap();
+        }
+        
         // test code - turn on the LED and show a different color when the mode is changed
         color_pins[current_display_index].set_low().unwrap();
-
+        
         rprintln!(
             "RGB values: {} {} {}",
             rgb_values.r,
@@ -194,7 +221,27 @@ fn main() -> ! {
             rgb_values.b
         );
 
-        // show the current display based on the index.
+        // Calculate values needed for the timer interrupt
+        let red_turn_off_steps = calculate_turn_off_steps(rgb_values.r);
+        let green_turn_off_steps = calculate_turn_off_steps(rgb_values.g);
+        let blue_turn_off_steps = calculate_turn_off_steps(rgb_values.b);
+
+        let red_intr_val_us = calculate_timer_interrupt_val_us(red_turn_off_steps);
+
+        rprintln!(
+            "Turn off steps: {} {} {}",
+            red_turn_off_steps,
+            green_turn_off_steps,
+            blue_turn_off_steps,
+        );
+
+        rprintln!("Timer interrupt val: {}", red_intr_val_us);
+
+        // ******* STEP 4: Block in the display *******
+
+        // show the current display for 100 ms
         display.show(&mut timer, display_list[current_display_index], 100);
+
+        // Return to the top of the loop
     }
 }
