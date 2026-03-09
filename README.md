@@ -9,14 +9,21 @@ Compile and run the project with `cargo embed --release`.
 
 To run in debug mode, use `cargo embed`. 
 
-
 ## What I did
 
-TBD
+I created a program that uses a breadboard, an LED, a potentiometer, and a microbit to show off the HSV color space. The user can turn the potentiometer to adjust the color of the LED. 
+
+More information TBD
 
 ## How it went
 
-TBD
+I found this project challenging due to two primary factors:
+
+1) Setting up the wires/hardware.
+
+2) Understanding timer interrupts.
+
+More information TBD
 
 ## Acknowledgements
 
