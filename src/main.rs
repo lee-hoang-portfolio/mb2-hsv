@@ -19,7 +19,7 @@ use microbit::{
     display::blocking::Display,
     hal::{
         Timer,
-        gpio::{Pin, Level, Output, PushPull},
+        gpio::{Pin, Level, Input, Output, Floating, PushPull},
         gpiote::{Gpiote},
         pac::{NVIC, self, interrupt},
         saadc::{Saadc, SaadcConfig},
@@ -42,6 +42,31 @@ use hsv::Hsv;
 // used for sharing variables between the interrupt handler and the main code
 use critical_section_lock_mut::LockMut;
 // =======================================================
+// constants for what to show on the MB2 display
+const H_VIEW: [[u8; 5]; 5] = [
+    // Hue
+    [1u8, 0u8, 0u8, 0u8, 1u8],
+    [1u8, 0u8, 0u8, 0u8, 1u8],
+    [1u8, 1u8, 1u8, 1u8, 1u8],
+    [1u8, 0u8, 0u8, 0u8, 1u8],
+    [1u8, 0u8, 0u8, 0u8, 1u8],
+];
+const S_VIEW: [[u8; 5]; 5] = [
+    // Saturation
+    [1u8, 1u8, 1u8, 1u8, 1u8],
+    [1u8, 0u8, 0u8, 0u8, 0u8],
+    [1u8, 1u8, 1u8, 1u8, 1u8],
+    [0u8, 0u8, 0u8, 0u8, 1u8],
+    [1u8, 1u8, 1u8, 1u8, 1u8],
+];
+const V_VIEW: [[u8; 5]; 5] = [
+    // Value
+    [1u8, 0u8, 0u8, 0u8, 1u8],
+    [1u8, 0u8, 0u8, 0u8, 1u8],
+    [1u8, 0u8, 0u8, 0u8, 1u8],
+    [0u8, 1u8, 0u8, 1u8, 0u8],
+    [0u8, 0u8, 1u8, 0u8, 0u8],
+];
 // =======================================================
 // struct definitions
 
@@ -82,11 +107,50 @@ impl LedDisplay {
         self.led_cycles[2] *= 100;
     }
 }
+// =======================================================
+// button struct
+// contains both the A and B buttons on the Microbit
+struct Buttons {
+    buttons: [Pin<Input<Floating>>; 2], // back button is the first element, forward button is the second element
+    current_display_index: usize, // the current display index
+    display_list: [[[u8; 5]; 5]; 3], // a list of 3 displays showing H, S, or V
+}
+
+impl Buttons {
+    fn new(mb2_buttons: [Pin<Input<Floating>>; 2]) -> Self {
+        // initialize the struct
+        Self {
+            buttons: mb2_buttons,
+            current_display_index: 0,
+            display_list: [H_VIEW, S_VIEW, V_VIEW]
+        }
+    }
+
+    // change the MB2 display
+    fn change_mb2_display(&mut self) {
+        if self.buttons[1].is_low().unwrap() && self.current_display_index < 2 {
+            self.current_display_index += 1;
+        } else if self.buttons[1].is_low().unwrap() && self.current_display_index == 2 {
+            self.current_display_index = 0;
+        }
+        
+        // move to the previous state
+        // if doing so causes the index to become negative, wrap back to 2 (V)
+        if self.buttons[0].is_low().unwrap() && self.current_display_index > 0 {
+            self.current_display_index -= 1;
+        } else if self.buttons[0].is_low().unwrap() && self.current_display_index == 0 {
+            self.current_display_index = 2;
+        }
+    }
+}
 
 // =======================================================
 // Interrupt variables
 // Share the display between the interrupt handler and the main loop
 static DISPLAY_LOCK: LockMut<LedDisplay> = LockMut::new();
+static BUTTON_LOCK: LockMut<Buttons> = LockMut::new(); // TBD
+
+// =======================================================
 
 // Interrupt handler
 #[interrupt]
@@ -128,12 +192,12 @@ fn main() -> ! {
     let mut leddisplay = LedDisplay::new(color_pins, timer);
     // Enable timer interrupts
     leddisplay.timer0.enable_interrupt();
-
     DISPLAY_LOCK.init(leddisplay);
 
     // Initialize the buttons
-    let mut back_button = board.buttons.button_a; // right to left: H < S < V
-    let mut forward_button = board.buttons.button_b; // left to right: H > S > V
+    let back_button = board.buttons.button_a; // right to left: H < S < V
+    let forward_button = board.buttons.button_b; // left to right: H > S > V
+    let mut buttons = Buttons::new([back_button.degrade(), forward_button.degrade()]);
 
     // initialize the display
     let mut display = Display::new(board.display_pins);
@@ -143,38 +207,6 @@ fn main() -> ! {
     let saadc_config = SaadcConfig::default();
     let mut saadc = Saadc::new(board.ADC, saadc_config);
     let mut saadc_pin = board.edge.e02.into_floating_input(); // For the rotary device, the other pins are for ground and 3.3V
-
-
-    // define the three displays for H, S, and V
-    // default starting display is H (Hue)
-    const H_VIEW: [[u8; 5]; 5] = [
-        // Hue
-        [1u8, 0u8, 0u8, 0u8, 1u8],
-        [1u8, 0u8, 0u8, 0u8, 1u8],
-        [1u8, 1u8, 1u8, 1u8, 1u8],
-        [1u8, 0u8, 0u8, 0u8, 1u8],
-        [1u8, 0u8, 0u8, 0u8, 1u8],
-    ];
-    const S_VIEW: [[u8; 5]; 5] = [
-        // Saturation
-        [1u8, 1u8, 1u8, 1u8, 1u8],
-        [1u8, 0u8, 0u8, 0u8, 0u8],
-        [1u8, 1u8, 1u8, 1u8, 1u8],
-        [0u8, 0u8, 0u8, 0u8, 1u8],
-        [1u8, 1u8, 1u8, 1u8, 1u8],
-    ];
-    const V_VIEW: [[u8; 5]; 5] = [
-        // Value
-        [1u8, 0u8, 0u8, 0u8, 1u8],
-        [1u8, 0u8, 0u8, 0u8, 1u8],
-        [1u8, 0u8, 0u8, 0u8, 1u8],
-        [0u8, 1u8, 0u8, 1u8, 0u8],
-        [0u8, 0u8, 1u8, 0u8, 0u8],
-    ];
-
-    // set up the list of displays.
-    let mut current_display_index: usize = 0;
-    let display_list = [H_VIEW, S_VIEW, V_VIEW];
 
     // set up the list of HSV values to convert to RGB
     let mut hsv_values: hsv::Hsv = Hsv {
@@ -199,21 +231,7 @@ fn main() -> ! {
         
         // move to the next state
         // if doing so causes the index to be 3 or more, wrap back to index 0 (H)
-        if forward_button.is_low().unwrap() && current_display_index < 2 {
-            current_display_index += 1;
-        } else if forward_button.is_low().unwrap() && current_display_index == 2 {
-            current_display_index = 0;
-        }
-        
-        // move to the previous state
-        // if doing so causes the index to become negative, wrap back to 2 (V)
-        if back_button.is_low().unwrap() && current_display_index > 0 {
-            current_display_index -= 1;
-        } else if back_button.is_low().unwrap() && current_display_index == 0 {
-            current_display_index = 2;
-        }
-
-        
+        buttons.change_mb2_display();     
 
         // ******* STEP 2: Read potentiometer value *******
         
@@ -226,11 +244,11 @@ fn main() -> ! {
         pot_val = pot_val.clamp(0.0, 1.0);
         
         // determine which value to update based on index.
-        if current_display_index == 0 {
+        if buttons.current_display_index == 0 {
             hsv_values.h = pot_val;
-        } else if current_display_index == 1 {
+        } else if buttons.current_display_index == 1 {
             hsv_values.s = pot_val;
-        } else if current_display_index == 2 {
+        } else if buttons.current_display_index == 2 {
             hsv_values.v = pot_val;
         }
         
@@ -253,7 +271,7 @@ fn main() -> ! {
                 pin.set_high().unwrap();
             }
             // test code - turn on the LED and show a different color when the mode is changed
-            leddisplay.led_pins[current_display_index].set_low().unwrap();
+            leddisplay.led_pins[buttons.current_display_index].set_low().unwrap();
 
             // calculate the new cycle values
             leddisplay.calculate_cycle_values(&rgb_values);
@@ -269,7 +287,7 @@ fn main() -> ! {
 
         // show the current display for 100 ms
         DISPLAY_LOCK.with_lock(|leddisplay|{
-            display.show(&mut leddisplay.timer0, display_list[current_display_index], 100);
+            display.show(&mut leddisplay.timer0, buttons.display_list[buttons.current_display_index], 100);
         })
 
         // Return to the top of the loop
