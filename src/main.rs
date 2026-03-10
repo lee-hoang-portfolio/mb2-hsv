@@ -157,11 +157,11 @@ static BUTTON_LOCK: LockMut<Buttons> = LockMut::new(); // TBD
 fn GPIOTE() {
     rprintln!("Entering interrupt");
     // TBD - Interrupt based on a timer
-    DISPLAY_LOCK.with_lock(|display| {
-        if display.timer0.read() == 0 {
-            display.timer0.start(100);
+    DISPLAY_LOCK.with_lock(|leddisplay| {
+        if leddisplay.timer0.read() == 0 {
+            leddisplay.timer0.start(100);
         }
-        display.display();
+        leddisplay.display();
     })
 }
 
