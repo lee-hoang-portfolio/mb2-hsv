@@ -20,6 +20,7 @@ use microbit::{
     hal::{
         Timer,
         gpio::{Pin, Level, Output, PushPull},
+        gpiote::{Gpiote},
         pac::{NVIC, self, interrupt},
         saadc::{Saadc, SaadcConfig},
     }, // used for controlling LED brightness
@@ -41,21 +42,6 @@ use hsv::Hsv;
 // used for sharing variables between the interrupt handler and the main code
 use critical_section_lock_mut::LockMut;
 // =======================================================
-
-
-
-// =======================================================
-// Given the RGB value, determine when to turn off the LED
-fn calculate_turn_off_steps(rgb_val: f32) -> i16 {
-    let turn_off_value = rgb_val * 100.0;
-    let turn_off_value_int: i16 = turn_off_value as i16;
-    turn_off_value_int
-}
-
-// given the turn_off_value as an integer, determine when to set the timer to interrupt in us (microseconds)
-fn calculate_timer_interrupt_val_us(turn_off_val: i16) -> i16 {
-    turn_off_val * 100 // this value is in us
-}
 // =======================================================
 // struct definitions
 
@@ -64,7 +50,7 @@ fn calculate_timer_interrupt_val_us(turn_off_val: i16) -> i16 {
 struct LedDisplay {
     timer0: Timer<pac::TIMER0>, // The timer that will interrupt
     led_pins: [Pin<Output<PushPull>>; 3], // The LED pins
-    led_cycles: [u32; 3], // determine when to turn off the LED
+    led_cycles: [u32; 3], // determine when to turn off the LED.
 }
 
 // define what functions are available for an LedDisplay
@@ -84,8 +70,17 @@ impl LedDisplay {
     }
 
 
-    // convert hsv values to cycles
-    // TBD
+    // convert rgb values to cycles
+    fn calculate_cycle_values(&mut self, rgb: &hsv::Rgb) {
+        self.led_cycles[0] = (rgb.r * 100.0) as u32;
+        self.led_cycles[0] *= 100;
+
+        self.led_cycles[1] = (rgb.g * 100.0) as u32;
+        self.led_cycles[1] *= 100;
+
+        self.led_cycles[2] = (rgb.b * 100.0) as u32;
+        self.led_cycles[2] *= 100;
+    }
 }
 
 // =======================================================
@@ -96,8 +91,12 @@ static DISPLAY_LOCK: LockMut<LedDisplay> = LockMut::new();
 // Interrupt handler
 #[interrupt]
 fn GPIOTE() {
+    rprintln!("Entering interrupt");
     // TBD - Interrupt based on a timer
     DISPLAY_LOCK.with_lock(|display| {
+        if display.timer0.read() == 0 {
+            display.timer0.start(100);
+        }
         display.display();
     })
 }
@@ -255,30 +254,16 @@ fn main() -> ! {
             }
             // test code - turn on the LED and show a different color when the mode is changed
             leddisplay.led_pins[current_display_index].set_low().unwrap();
+
+            // calculate the new cycle values
+            leddisplay.calculate_cycle_values(&rgb_values);
+            rprintln!(
+                "Cycle values: {} {} {}",
+                leddisplay.led_cycles[0],
+                leddisplay.led_cycles[1],
+                leddisplay.led_cycles[2],
+            );
         });
-        
-        rprintln!(
-            "RGB values: {} {} {}",
-            rgb_values.r,
-            rgb_values.g,
-            rgb_values.b
-        );
-
-        // Calculate values needed for the timer interrupt
-        let red_turn_off_steps = calculate_turn_off_steps(rgb_values.r);
-        let green_turn_off_steps = calculate_turn_off_steps(rgb_values.g);
-        let blue_turn_off_steps = calculate_turn_off_steps(rgb_values.b);
-
-        let red_intr_val_us = calculate_timer_interrupt_val_us(red_turn_off_steps);
-
-        rprintln!(
-            "Turn off steps: {} {} {}",
-            red_turn_off_steps,
-            green_turn_off_steps,
-            blue_turn_off_steps,
-        );
-
-        rprintln!("Timer interrupt val: {}", red_intr_val_us);
 
         // ******* STEP 4: Block in the display *******
 
