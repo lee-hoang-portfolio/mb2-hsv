@@ -21,4 +21,4 @@ version = "0.7"
 features = ["inline-asm", "critical-section-single-core"]
 
 [dependencies.hsv]
-git = "https://github.com/pdx-cs-rust-embedded/hsv"
+git = "http://github.com/pdx-cs-rust-embedded/hsv"

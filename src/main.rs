@@ -11,7 +11,6 @@ use rtt_target::{rprintln, rtt_init_print};
 // define the entry point
 // docs: https://docs.rs/cortex-m-rt/0.7.5/cortex_m_rt/
 use cortex_m_rt::entry;
-use cortex_m::asm;
 
 // Microbit crate
 // docs: https://docs.rs/microbit-v2/0.16.0/microbit/
@@ -20,9 +19,9 @@ use microbit::{
     display::blocking::Display,
     hal::{
         Timer,
-        gpio::{Pin, Level, Input, Output, Floating, PushPull},
-        gpiote::{Gpiote},
-        pac::{NVIC, self, interrupt},
+        gpio::{Floating, Input, Level, Output, Pin, PushPull},
+        gpiote::Gpiote,
+        pac::{self, NVIC, interrupt},
         saadc::{Saadc, SaadcConfig},
     }, // used for controlling LED brightness
 };
@@ -74,9 +73,9 @@ const V_VIEW: [[u8; 5]; 5] = [
 // struct for a display
 // this will be shared between the main loop and the interrupt handler
 struct LedDisplay {
-    timer0: Timer<pac::TIMER0>, // The timer that will interrupt
+    timer0: Timer<pac::TIMER0>,           // The timer that will interrupt
     led_pins: [Pin<Output<PushPull>>; 3], // The LED pins
-    led_cycles: [u32; 3], // determine when to turn off the LED.
+    led_cycles: [u32; 3],                 // determine when to turn off the LED.
 }
 
 // define what functions are available for an LedDisplay
@@ -86,15 +85,18 @@ impl LedDisplay {
         Self {
             led_pins: pins,
             led_cycles: [0, 0, 0],
-            timer0
+            timer0,
         }
     }
 
-    // display a message
-    fn display(&self) {
+    // Start by turning all of RGB on and setting the timer for
+    // the time when you will turn one or more of them off.
+    // Keep doing this until they are all off, and then set the timer
+    // for the start of the next frame.
+    fn display(&mut self) {
         rprintln!("THIS IS A TEST: {}", self.led_cycles[0]);
+        self.timer0.start(1_000_000);
     }
-
 
     // convert rgb values to cycles
     fn calculate_cycle_values(&mut self, rgb: &hsv::Rgb) {
@@ -114,7 +116,7 @@ impl LedDisplay {
 struct Buttons {
     buttons: [Pin<Input<Floating>>; 2], // back button is the first element, forward button is the second element
     gpiote0: Gpiote,
-    current_display_index: usize, // the current display index
+    current_display_index: usize,    // the current display index
     display_list: [[[u8; 5]; 5]; 3], // a list of 3 displays showing H, S, or V
 }
 
@@ -125,13 +127,21 @@ impl Buttons {
             buttons: mb2_buttons,
             gpiote0: mb2_gpiote,
             current_display_index: 0,
-            display_list: [H_VIEW, S_VIEW, V_VIEW]
+            display_list: [H_VIEW, S_VIEW, V_VIEW],
         }
     }
 
     fn setup_button_interrupts(&mut self) {
-        self.gpiote0.channel0().input_pin(&self.buttons[0]).hi_to_lo().enable_interrupt();
-        self.gpiote0.channel1().input_pin(&self.buttons[1]).hi_to_lo().enable_interrupt();
+        self.gpiote0
+            .channel0()
+            .input_pin(&self.buttons[0])
+            .hi_to_lo()
+            .enable_interrupt();
+        self.gpiote0
+            .channel1()
+            .input_pin(&self.buttons[1])
+            .hi_to_lo()
+            .enable_interrupt();
 
         self.gpiote0.channel0().reset_events();
         self.gpiote0.channel1().reset_events();
@@ -144,7 +154,7 @@ impl Buttons {
         } else if self.buttons[1].is_low().unwrap() && self.current_display_index == 2 {
             self.current_display_index = 0;
         }
-        
+
         // move to the previous state
         // if doing so causes the index to become negative, wrap back to 2 (V)
         if self.buttons[0].is_low().unwrap() && self.current_display_index > 0 {
@@ -153,7 +163,6 @@ impl Buttons {
             self.current_display_index = 2;
         }
     }
-
 
     // Testing button interrupt
     fn test_print(&self) {
@@ -184,16 +193,16 @@ fn GPIOTE() {
         mb2_buttons.gpiote0.channel0().reset_events();
         mb2_buttons.gpiote0.channel1().reset_events();
     });
-    // TBD - Interrupt based on a timer
+}
+
+#[interrupt]
+fn TIMER0() {
+    // Always start a new timer with time > 0.
     DISPLAY_LOCK.with_lock(|leddisplay| {
-        if leddisplay.timer0.read() == 0 {
-            leddisplay.timer0.start(100);
-        }
         leddisplay.display();
     })
 }
 
-// =======================================================
 #[entry]
 fn main() -> ! {
     rtt_init_print!();
@@ -220,6 +229,9 @@ fn main() -> ! {
     let mut leddisplay = LedDisplay::new(color_pins, timer);
     // Enable timer interrupts
     leddisplay.timer0.enable_interrupt();
+    // Get the timer started
+    leddisplay.display();
+    // Move the display into the global
     DISPLAY_LOCK.init(leddisplay);
 
     // Initialize the buttons
@@ -249,36 +261,37 @@ fn main() -> ! {
     // Enable interrupts for the NVIC
     // Requires unsafe block to run
     unsafe {
-        NVIC::unmask(pac::Interrupt::GPIOTE)
-    };
+        NVIC::unmask(pac::Interrupt::GPIOTE);
+        NVIC::unmask(pac::Interrupt::TIMER0);
+    }
 
     // clear interrupt state
     NVIC::unpend(pac::Interrupt::GPIOTE);
-    
+    NVIC::unpend(pac::Interrupt::TIMER0);
 
     // Main loop
     loop {
         //asm::wfi();
         // ******* STEP 1: Check for button presses *******
-        
+
         // move to the next state
         // if doing so causes the index to be 3 or more, wrap back to index 0 (H)
         BUTTON_LOCK.with_lock(|buttons| {
-            buttons.change_mb2_display();     
+            buttons.change_mb2_display();
         });
 
         // ******* STEP 2: Read potentiometer value *******
-        
+
         // Read the potentiometer value and scale it to be between 0 and 1
         let potentiometer_res = saadc.read_channel(&mut saadc_pin).unwrap();
         let mut pot_val: f32 = potentiometer_res.into();
         pot_val /= MAX_POT_VALUE;
-        
+
         // clamp the potentiometer value between 0 and 1
         pot_val = pot_val.clamp(0.0, 1.0);
-        
+
         // determine which value to update based on index.
-        BUTTON_LOCK.with_lock(|buttons|{
+        BUTTON_LOCK.with_lock(|buttons| {
             if buttons.current_display_index == 0 {
                 hsv_values.h = pot_val;
             } else if buttons.current_display_index == 1 {
@@ -287,7 +300,7 @@ fn main() -> ! {
                 hsv_values.v = pot_val;
             }
         });
-        
+
         rprintln!(
             "HSV values: {} {} {}",
             hsv_values.h,
@@ -295,20 +308,22 @@ fn main() -> ! {
             hsv_values.v
         );
 
-
         // ******* STEP 3: Convert HSV values to RGB *******
 
         // Convert HSV to RGB
         let rgb_values: hsv::Rgb = hsv_values.to_rgb();
 
+        // XXX Deal with LED display in `LedDisplay::display()` method.
         // turn off the led
         DISPLAY_LOCK.with_lock(|leddisplay| {
             for pin in leddisplay.led_pins.iter_mut() {
                 pin.set_high().unwrap();
             }
             // test code - turn on the LED and show a different color when the mode is changed
-            BUTTON_LOCK.with_lock(|buttons|{
-                leddisplay.led_pins[buttons.current_display_index].set_low().unwrap()
+            BUTTON_LOCK.with_lock(|buttons| {
+                leddisplay.led_pins[buttons.current_display_index]
+                    .set_low()
+                    .unwrap()
             });
 
             // calculate the new cycle values
@@ -323,10 +338,15 @@ fn main() -> ! {
 
         // ******* STEP 4: Block in the display *******
 
-        // show the current display for 100 ms
-        DISPLAY_LOCK.with_lock(|leddisplay|{
-            BUTTON_LOCK.with_lock(|buttons|{
-                display.show(&mut leddisplay.timer0, buttons.display_list[buttons.current_display_index], 100);
+        // XXX Don't block here, move this code to timer0 handler.
+        // Show the current LED settings and set next timer.
+        DISPLAY_LOCK.with_lock(|leddisplay| {
+            BUTTON_LOCK.with_lock(|buttons| {
+                display.show(
+                    &mut leddisplay.timer0,
+                    buttons.display_list[buttons.current_display_index],
+                    100,
+                );
             });
         })
 
