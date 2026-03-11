@@ -11,6 +11,7 @@ use rtt_target::{rprintln, rtt_init_print};
 // define the entry point
 // docs: https://docs.rs/cortex-m-rt/0.7.5/cortex_m_rt/
 use cortex_m_rt::entry;
+use cortex_m::asm;
 
 // Microbit crate
 // docs: https://docs.rs/microbit-v2/0.16.0/microbit/
@@ -112,18 +113,28 @@ impl LedDisplay {
 // contains both the A and B buttons on the Microbit
 struct Buttons {
     buttons: [Pin<Input<Floating>>; 2], // back button is the first element, forward button is the second element
+    gpiote0: Gpiote,
     current_display_index: usize, // the current display index
     display_list: [[[u8; 5]; 5]; 3], // a list of 3 displays showing H, S, or V
 }
 
 impl Buttons {
-    fn new(mb2_buttons: [Pin<Input<Floating>>; 2]) -> Self {
+    fn new(mb2_buttons: [Pin<Input<Floating>>; 2], mb2_gpiote: Gpiote) -> Self {
         // initialize the struct
         Self {
             buttons: mb2_buttons,
+            gpiote0: mb2_gpiote,
             current_display_index: 0,
             display_list: [H_VIEW, S_VIEW, V_VIEW]
         }
+    }
+
+    fn setup_button_interrupts(&mut self) {
+        self.gpiote0.channel0().input_pin(&self.buttons[0]).hi_to_lo().enable_interrupt();
+        self.gpiote0.channel1().input_pin(&self.buttons[1]).hi_to_lo().enable_interrupt();
+
+        self.gpiote0.channel0().reset_events();
+        self.gpiote0.channel1().reset_events();
     }
 
     // change the MB2 display
@@ -142,6 +153,12 @@ impl Buttons {
             self.current_display_index = 2;
         }
     }
+
+
+    // Testing button interrupt
+    fn test_print(&self) {
+        rprintln!("Testing button interrupt");
+    }
 }
 
 // =======================================================
@@ -156,6 +173,17 @@ static BUTTON_LOCK: LockMut<Buttons> = LockMut::new(); // TBD
 #[interrupt]
 fn GPIOTE() {
     rprintln!("Entering interrupt");
+    BUTTON_LOCK.with_lock(|mb2_buttons| {
+        rprintln!("Testing");
+        let back_button_pressed = mb2_buttons.gpiote0.channel0().is_event_triggered();
+        let forward_button_pressed = mb2_buttons.gpiote0.channel1().is_event_triggered();
+        if back_button_pressed || forward_button_pressed {
+            mb2_buttons.test_print();
+        }
+
+        mb2_buttons.gpiote0.channel0().reset_events();
+        mb2_buttons.gpiote0.channel1().reset_events();
+    });
     // TBD - Interrupt based on a timer
     DISPLAY_LOCK.with_lock(|leddisplay| {
         if leddisplay.timer0.read() == 0 {
@@ -197,7 +225,10 @@ fn main() -> ! {
     // Initialize the buttons
     let back_button = board.buttons.button_a; // right to left: H < S < V
     let forward_button = board.buttons.button_b; // left to right: H > S > V
-    let mut buttons = Buttons::new([back_button.degrade(), forward_button.degrade()]);
+    let gpiote = Gpiote::new(board.GPIOTE);
+    let mut buttons = Buttons::new([back_button.degrade(), forward_button.degrade()], gpiote);
+    buttons.setup_button_interrupts();
+    BUTTON_LOCK.init(buttons);
 
     // initialize the display
     let mut display = Display::new(board.display_pins);
@@ -227,11 +258,14 @@ fn main() -> ! {
 
     // Main loop
     loop {
+        //asm::wfi();
         // ******* STEP 1: Check for button presses *******
         
         // move to the next state
         // if doing so causes the index to be 3 or more, wrap back to index 0 (H)
-        buttons.change_mb2_display();     
+        BUTTON_LOCK.with_lock(|buttons| {
+            buttons.change_mb2_display();     
+        });
 
         // ******* STEP 2: Read potentiometer value *******
         
@@ -244,13 +278,15 @@ fn main() -> ! {
         pot_val = pot_val.clamp(0.0, 1.0);
         
         // determine which value to update based on index.
-        if buttons.current_display_index == 0 {
-            hsv_values.h = pot_val;
-        } else if buttons.current_display_index == 1 {
-            hsv_values.s = pot_val;
-        } else if buttons.current_display_index == 2 {
-            hsv_values.v = pot_val;
-        }
+        BUTTON_LOCK.with_lock(|buttons|{
+            if buttons.current_display_index == 0 {
+                hsv_values.h = pot_val;
+            } else if buttons.current_display_index == 1 {
+                hsv_values.s = pot_val;
+            } else if buttons.current_display_index == 2 {
+                hsv_values.v = pot_val;
+            }
+        });
         
         rprintln!(
             "HSV values: {} {} {}",
@@ -271,7 +307,9 @@ fn main() -> ! {
                 pin.set_high().unwrap();
             }
             // test code - turn on the LED and show a different color when the mode is changed
-            leddisplay.led_pins[buttons.current_display_index].set_low().unwrap();
+            BUTTON_LOCK.with_lock(|buttons|{
+                leddisplay.led_pins[buttons.current_display_index].set_low().unwrap()
+            });
 
             // calculate the new cycle values
             leddisplay.calculate_cycle_values(&rgb_values);
@@ -287,7 +325,9 @@ fn main() -> ! {
 
         // show the current display for 100 ms
         DISPLAY_LOCK.with_lock(|leddisplay|{
-            display.show(&mut leddisplay.timer0, buttons.display_list[buttons.current_display_index], 100);
+            BUTTON_LOCK.with_lock(|buttons|{
+                display.show(&mut leddisplay.timer0, buttons.display_list[buttons.current_display_index], 100);
+            });
         })
 
         // Return to the top of the loop
