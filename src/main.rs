@@ -95,7 +95,7 @@ impl LedDisplay {
     // for the start of the next frame.
     fn display(&mut self) {
         rprintln!("THIS IS A TEST: {}", self.led_cycles[0]);
-        self.timer0.start(1_000_000);
+        self.timer0.start(1_000_000); // 1 million ticks
     }
 
     // convert rgb values to cycles
@@ -118,16 +118,18 @@ struct Buttons {
     gpiote0: Gpiote,
     current_display_index: usize,    // the current display index
     display_list: [[[u8; 5]; 5]; 3], // a list of 3 displays showing H, S, or V
+    mb2_display: Display,
 }
 
 impl Buttons {
-    fn new(mb2_buttons: [Pin<Input<Floating>>; 2], mb2_gpiote: Gpiote) -> Self {
+    fn new(mb2_buttons: [Pin<Input<Floating>>; 2], mb2_gpiote: Gpiote, mb2_display: Display) -> Self {
         // initialize the struct
         Self {
             buttons: mb2_buttons,
             gpiote0: mb2_gpiote,
             current_display_index: 0,
             display_list: [H_VIEW, S_VIEW, V_VIEW],
+            mb2_display
         }
     }
 
@@ -178,7 +180,7 @@ static BUTTON_LOCK: LockMut<Buttons> = LockMut::new(); // TBD
 
 // =======================================================
 
-// Interrupt handler
+// Button interrupt handler
 #[interrupt]
 fn GPIOTE() {
     rprintln!("Entering interrupt");
@@ -195,12 +197,25 @@ fn GPIOTE() {
     });
 }
 
+// Timer interrupt handler
 #[interrupt]
 fn TIMER0() {
     // Always start a new timer with time > 0.
     DISPLAY_LOCK.with_lock(|leddisplay| {
         leddisplay.display();
-    })
+
+        // This code was moved from the super loop into the handler
+        BUTTON_LOCK.with_lock(|buttons| {
+            buttons.mb2_display.show(
+                &mut leddisplay.timer0,
+                buttons.display_list[buttons.current_display_index],
+                100,
+            );
+        });
+
+        leddisplay.timer0.reset_event();
+
+    }) // end of DISPLAY_LOCK
 }
 
 #[entry]
@@ -238,12 +253,12 @@ fn main() -> ! {
     let back_button = board.buttons.button_a; // right to left: H < S < V
     let forward_button = board.buttons.button_b; // left to right: H > S > V
     let gpiote = Gpiote::new(board.GPIOTE);
-    let mut buttons = Buttons::new([back_button.degrade(), forward_button.degrade()], gpiote);
-    buttons.setup_button_interrupts();
-    BUTTON_LOCK.init(buttons);
-
     // initialize the display
-    let mut display = Display::new(board.display_pins);
+    let display = Display::new(board.display_pins);
+    let mut buttons = Buttons::new([back_button.degrade(), forward_button.degrade()], gpiote, display);
+    buttons.setup_button_interrupts();
+    BUTTON_LOCK.init(buttons); // move the buttons into the global
+
 
     // initialize the SAADC
     // Docs: https://docs.rs/microbit-v2/0.16.0/microbit/hal/saadc/index.html
@@ -261,8 +276,8 @@ fn main() -> ! {
     // Enable interrupts for the NVIC
     // Requires unsafe block to run
     unsafe {
-        NVIC::unmask(pac::Interrupt::GPIOTE);
-        NVIC::unmask(pac::Interrupt::TIMER0);
+        NVIC::unmask(pac::Interrupt::GPIOTE); // button interrupt handler
+        NVIC::unmask(pac::Interrupt::TIMER0); // timer interrupt handler
     }
 
     // clear interrupt state
@@ -289,6 +304,10 @@ fn main() -> ! {
 
         // clamp the potentiometer value between 0 and 1
         pot_val = pot_val.clamp(0.0, 1.0);
+        
+        // TODO - keep previous potentiometer value
+        // compare to the new value and determine the difference
+        // if the difference is above a certain amount, interrupt
 
         // determine which value to update based on index.
         BUTTON_LOCK.with_lock(|buttons| {
@@ -338,17 +357,8 @@ fn main() -> ! {
 
         // ******* STEP 4: Block in the display *******
 
-        // XXX Don't block here, move this code to timer0 handler.
-        // Show the current LED settings and set next timer.
-        DISPLAY_LOCK.with_lock(|leddisplay| {
-            BUTTON_LOCK.with_lock(|buttons| {
-                display.show(
-                    &mut leddisplay.timer0,
-                    buttons.display_list[buttons.current_display_index],
-                    100,
-                );
-            });
-        })
+        // TBD - show current LED settings
+        
 
         // Return to the top of the loop
     }
