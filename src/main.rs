@@ -30,7 +30,7 @@ use microbit::{
 // https://docs.rs/embedded-hal/1.0.0/embedded_hal/
 use embedded_hal::{
     delay::DelayNs,
-    digital::{InputPin, OutputPin},
+    digital::{InputPin, OutputPin, StatefulOutputPin},
 };
 
 // hsv crate for converting HSV to RGB
@@ -99,67 +99,54 @@ impl LedDisplay {
     // for the start of the next frame.
     //
     // called inside the interrupt handler
+    // https://docs.rust-embedded.org/discovery-mb2/15-interrupts/my-solution.html
     fn display(&mut self) {
-        // turn off all LEDs
-        for pin in self.led_pins.iter_mut() {
-            pin.set_high().unwrap();
-        }
-
-
-        // rprintln!("THIS IS A TEST: {}", self.led_cycles[0]);
         // turn all of RGB on
         self.led_pins[0].set_low();
         self.led_pins[1].set_low();
         self.led_pins[2].set_low();
 
-        // set up the times when parts of RGB will be turned off
-        match self.next_cycles {
-            Some(cycles) => cycles,
-            None => [0, 0, 0]
-        };
-        rprintln!("Cycle values: {} {} {}", self.led_cycles[0], self.led_cycles[1], self.led_cycles[2]);
+        
+        // set the LED to a specific color
         for i in 0..3 {
-            // turn the led off after "pin" number of steps
-            let mut time_val = self.led_cycles[i] * 100; // this value is in microseconds. set the timer to interrupt after this time. 
-            //self.timer0.start(time_val);
-            self.led_pins[0].set_high();
-            //self.timer0.reset_event();
-            rprintln!("Time val: {}", time_val);
+            let time_val = self.led_cycles[i] * 100;
+            
+            self.led_pins[i].set_high();
+            self.timer0.reset_event();
+            self.timer0.start(time_val);
         }
-
-        // determine the smallest value
-        //TBD
-        rprintln!("Smallest value: {}", self.led_cycles[0].min(self.led_cycles[1]));
+        
+        // determine if all RGB is off
+        let mut all_set_low = false;
+        // convert pins to push pull to check state
+        if self.led_pins[0].is_set_high().unwrap() && self.led_pins[1].is_set_high().unwrap() && self.led_pins[2].is_set_high().unwrap() {
+            all_set_low = true;
+        }
+        rprintln!("All RGB off: {}", all_set_low);
 
         rprintln!("Cycle count: {}", self.cycles);
-        // set timer to start next frame
         self.cycles += 1;
-        self.timer0.start(1_000_000); // 1 million ticks is about 1 second
-
-        // after 2000 cycles, start a new frame
-        if self.cycles > 10 {
+        
+        // after 100 cycles, disable the interrupt
+        // TODO - make the interrupt work on an RGB change
+        self.timer0.reset_event();
+        self.timer0.start(1_000_000);
+        if self.cycles > 100 {
             rprintln!("Resetting event");
-            self.timer0.reset_event();
             self.cycles = 0;
+            self.timer0.disable_interrupt();
+        } else {
+            self.timer0.enable_interrupt();
         }
     }
 
     // convert rgb values to cycles
     fn calculate_cycle_values(&mut self, hsv: &hsv::Hsv)
     {
-        // convert hsv to rgb
         let rgb = hsv.to_rgb();
-        rprintln!("RGB after convert: {} {} {}", rgb.r, rgb.g, rgb.b);
-
-        self.next_cycles = Some([(rgb.r * 100.0) as u32, (rgb.g * 100.0) as u32, (rgb.b * 100.0) as u32]);
-        // self.led_cycles[0] = (rgb.r * 100.0) as u32; // set up the cycle time
-        // //self.led_cycles[0] *= 100; // determine interrupt time
-
-        // self.led_cycles[1] = (rgb.g * 100.0) as u32; // set up the cycle time
-        // //self.led_cycles[1] *= 100; // determine interrupt time
-
-        // self.led_cycles[2] = (rgb.b * 100.0) as u32;
-        //self.led_cycles[2] *= 100;
+        self.led_cycles[0] = rgb.r as u32;
+        self.led_cycles[1] = rgb.g as u32;
+        self.led_cycles[2] = rgb.b as u32;
     }
 }
 // =======================================================
@@ -191,6 +178,7 @@ impl Buttons {
             self.current_display_index += 1;
         } else if self.buttons[1].is_low().unwrap() && self.current_display_index == 2 {
             self.current_display_index = 0;
+
         }
 
         // move to the previous state
@@ -210,23 +198,6 @@ static DISPLAY_LOCK: LockMut<LedDisplay> = LockMut::new();
 static BUTTON_LOCK: LockMut<Buttons> = LockMut::new(); // TBD
 
 // =======================================================
-
-// // Button interrupt handler
-// #[interrupt]
-// fn GPIOTE() {
-//     rprintln!("Entering interrupt");
-//     BUTTON_LOCK.with_lock(|mb2_buttons| {
-//         rprintln!("Testing");
-//         let back_button_pressed = mb2_buttons.gpiote0.channel0().is_event_triggered();
-//         let forward_button_pressed = mb2_buttons.gpiote0.channel1().is_event_triggered();
-//         if back_button_pressed || forward_button_pressed {
-//             mb2_buttons.test_print();
-//         }
-
-//         mb2_buttons.gpiote0.channel0().reset_events();
-//         mb2_buttons.gpiote0.channel1().reset_events();
-//     });
-// }
 
 // Timer interrupt handler
 #[interrupt]
@@ -326,6 +297,8 @@ fn main() -> ! {
     NVIC::unpend(pac::Interrupt::GPIOTE);
     NVIC::unpend(pac::Interrupt::TIMER0);
 
+    // **********************************************************************************
+
     // Main loop
     loop {
         // ******* STEP 1: Check for button presses *******
@@ -336,39 +309,22 @@ fn main() -> ! {
             buttons.change_mb2_display();
         });
 
-        // ******* STEP 2: Read potentiometer value *******
+        // ******* STEP 2: Read potentiometer (pot) value *******
 
         // Read the potentiometer value and scale it to be between 0 and 1
         let potentiometer_res = saadc.read_channel(&mut saadc_pin).unwrap();
-        let mut pot_val: f32 = potentiometer_res.into();
+        let mut pot_val: f32 = potentiometer_res.into(); // convert to floating point
         
         // clamp the potentiometer value to be between 0 and 2^14 - 1
         pot_val = pot_val.clamp(0.0, MAX_POT_VALUE);
-        // TODO - keep previous potentiometer value
-        // compare to the new value and determine the difference
-        // if the difference is above a certain amount, interrupt
-        let mut pot_val_diff = pot_val - prev_pot_val;
+        pot_val /= MAX_POT_VALUE; // scale the pot value to be between 0 and 1
+
+        //rprintln!("Knob val: {}", pot_val);
+
         
-        if pot_val_diff < 0.0 {
-            pot_val_diff *= -1.0;
-        }
-
-        prev_pot_val = pot_val;
-        pot_val /= MAX_POT_VALUE; // scale the value to be between 0 and 1
-        rprintln!("Difference in pot values: {}", pot_val_diff);
-        // if pot_val_diff > 60.0 {
-        //     prev_pot_val = pot_val;
-        //     pot_val /= MAX_POT_VALUE;
-    
-        //     // // clamp the potentiometer value between 0 and 2^14 - 1
-        // } else {
-        //     prev_pot_val = pot_val;
-        //     pot_val /= MAX_POT_VALUE;
-    
-        // }
-
         // determine which value to update based on index.
         BUTTON_LOCK.with_lock(|buttons| {
+            rprintln!("Display index: {}", buttons.current_display_index);
             if buttons.current_display_index == 0 {
                 hsv_values.h = pot_val;
             } else if buttons.current_display_index == 1 {
@@ -376,14 +332,15 @@ fn main() -> ! {
             } else if buttons.current_display_index == 2 {
                 hsv_values.v = pot_val;
             }
+        
         });
 
-        // rprintln!(
-        //     "HSV values: {} {} {}",
-        //     hsv_values.h,
-        //     hsv_values.s,
-        //     hsv_values.v
-        // );
+        rprintln!(
+            "HSV values: {} {} {}",
+            hsv_values.h,
+            hsv_values.s,
+            hsv_values.v
+        );
 
         // ******* STEP 3: Convert HSV values to RGB *******
         // XXX Deal with LED display in `LedDisplay::display()` method.
@@ -396,9 +353,8 @@ fn main() -> ! {
         // ******* STEP 4: Block in the display *******
 
         // TBD - show current LED settings
-        
-        
-
         // Return to the top of the loop
     }
+
+    // **********************************************************************************
 }
