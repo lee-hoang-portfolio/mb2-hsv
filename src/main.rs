@@ -77,6 +77,7 @@ struct LedDisplay {
     timer0: Timer<pac::TIMER0>,           // The timer that will interrupt
     led_pins: [Pin<Output<PushPull>>; 3], // The LED pins
     led_cycles: [u32; 3],                 // determine when to turn off the LED.
+    next_cycles: Option<[u32; 3]>           // do we have another cycle set? If so, overwrite the current set of cycles
 }
 
 // define what functions are available for an LedDisplay
@@ -88,6 +89,7 @@ impl LedDisplay {
             led_pins: pins,
             led_cycles: [0, 0, 0],
             timer0,
+            next_cycles: None
         }
     }
 
@@ -104,13 +106,17 @@ impl LedDisplay {
         }
 
 
-        //rprintln!("THIS IS A TEST: {}", self.led_cycles[0]);
+        // rprintln!("THIS IS A TEST: {}", self.led_cycles[0]);
         // turn all of RGB on
         self.led_pins[0].set_low();
         self.led_pins[1].set_low();
         self.led_pins[2].set_low();
 
         // set up the times when parts of RGB will be turned off
+        match self.next_cycles {
+            Some(cycles) => cycles,
+            None => [0, 0, 0]
+        };
         rprintln!("Cycle values: {} {} {}", self.led_cycles[0], self.led_cycles[1], self.led_cycles[2]);
         for i in 0..3 {
             // turn the led off after "pin" number of steps
@@ -131,7 +137,7 @@ impl LedDisplay {
         self.timer0.start(1_000_000); // 1 million ticks is about 1 second
 
         // after 2000 cycles, start a new frame
-        if self.cycles > 100 {
+        if self.cycles > 10 {
             rprintln!("Resetting event");
             self.timer0.reset_event();
             self.cycles = 0;
@@ -144,13 +150,15 @@ impl LedDisplay {
         // convert hsv to rgb
         let rgb = hsv.to_rgb();
         rprintln!("RGB after convert: {} {} {}", rgb.r, rgb.g, rgb.b);
-        self.led_cycles[0] = (rgb.r * 100.0) as u32; // set up the cycle time
-        //self.led_cycles[0] *= 100; // determine interrupt time
 
-        self.led_cycles[1] = (rgb.g * 100.0) as u32; // set up the cycle time
-        //self.led_cycles[1] *= 100; // determine interrupt time
+        self.next_cycles = Some([(rgb.r * 100.0) as u32, (rgb.g * 100.0) as u32, (rgb.b * 100.0) as u32]);
+        // self.led_cycles[0] = (rgb.r * 100.0) as u32; // set up the cycle time
+        // //self.led_cycles[0] *= 100; // determine interrupt time
 
-        self.led_cycles[2] = (rgb.b * 100.0) as u32;
+        // self.led_cycles[1] = (rgb.g * 100.0) as u32; // set up the cycle time
+        // //self.led_cycles[1] *= 100; // determine interrupt time
+
+        // self.led_cycles[2] = (rgb.b * 100.0) as u32;
         //self.led_cycles[2] *= 100;
     }
 }
