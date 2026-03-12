@@ -29,7 +29,7 @@ use microbit::{
 // embedded-hal crate: For button and LED pin state
 // https://docs.rs/embedded-hal/1.0.0/embedded_hal/
 use embedded_hal::{
-    //delay::DelayNs,
+    delay::DelayNs,
     digital::{InputPin, OutputPin},
 };
 
@@ -94,6 +94,11 @@ impl LedDisplay {
     // Keep doing this until they are all off, and then set the timer
     // for the start of the next frame.
     fn display(&mut self) {
+        for pin in self.led_pins.iter_mut() {
+            pin.set_high().unwrap();
+        }
+
+
         //rprintln!("THIS IS A TEST: {}", self.led_cycles[0]);
         // turn all of RGB on
         self.led_pins[0].set_low();
@@ -102,6 +107,13 @@ impl LedDisplay {
 
         // set up the times when parts of RGB will be turned off
         rprintln!("RGB: {} {} {}", self.led_cycles[0], self.led_cycles[1], self.led_cycles[2]);
+        for i in 0..3 {
+            // turn the led off after "pin" number of steps
+            let mut time_val = self.led_cycles[i] * 100; // this value is in microseconds. set the timer to interrupt after this time. 
+            self.timer0.delay_us(time_val);
+            self.led_pins[i].set_high();
+            rprintln!("Time val: {}", time_val);
+        }
 
         // determine the smallest value
         //TBD
@@ -109,6 +121,7 @@ impl LedDisplay {
 
 
         // set timer to start
+        
         self.timer0.start(1_000_000); // 1 million ticks is about 1 second
     }
 
@@ -243,10 +256,11 @@ fn main() -> ! {
     // Move the display into the global
     DISPLAY_LOCK.init(leddisplay);
 
-    // Initialize the buttons
+    // Initialize the buttons and GPIOTE
     let back_button = board.buttons.button_a; // right to left: H < S < V
     let forward_button = board.buttons.button_b; // left to right: H > S > V
     let gpiote = Gpiote::new(board.GPIOTE);
+
     // initialize the display
     let display = Display::new(board.display_pins);
     let mut buttons = Buttons::new([back_button.degrade(), forward_button.degrade()], gpiote, display);
@@ -254,7 +268,7 @@ fn main() -> ! {
     BUTTON_LOCK.init(buttons); // move the buttons into the global
 
 
-    // initialize the SAADC
+    // initialize the SAADC for the potentiometer
     // Docs: https://docs.rs/microbit-v2/0.16.0/microbit/hal/saadc/index.html
     let saadc_config = SaadcConfig::default();
     let mut saadc = Saadc::new(board.ADC, saadc_config);
@@ -267,7 +281,8 @@ fn main() -> ! {
         v: 1.0,
     };
 
-    let mut prev_pot_val = 1.0;
+    // set up the previous potentiometer value
+    let mut prev_pot_val = 16383.0;
 
     // Enable interrupts for the NVIC
     // Requires unsafe block to run
@@ -288,13 +303,6 @@ fn main() -> ! {
         // if doing so causes the index to be 3 or more, wrap back to index 0 (H)
         BUTTON_LOCK.with_lock(|buttons| {
             buttons.change_mb2_display();
-            // DISPLAY_LOCK.with_lock(|leddisplay| {
-            //     buttons.mb2_display.show(
-            //         &mut leddisplay.timer0,
-            //         buttons.display_list[buttons.current_display_index],
-            //         100,
-            //     );
-            // })
         });
 
         // ******* STEP 2: Read potentiometer value *******
@@ -303,7 +311,8 @@ fn main() -> ! {
         let potentiometer_res = saadc.read_channel(&mut saadc_pin).unwrap();
         let mut pot_val: f32 = potentiometer_res.into();
         
-        
+        // clamp the potentiometer value to be between 0 and 2^14 - 1
+        pot_val = pot_val.clamp(0.0, MAX_POT_VALUE);
         // TODO - keep previous potentiometer value
         // compare to the new value and determine the difference
         // if the difference is above a certain amount, interrupt
@@ -315,21 +324,16 @@ fn main() -> ! {
         rprintln!("Difference in pot values: {}", pot_val_diff);
         if pot_val_diff > 60.0 {
             prev_pot_val = pot_val;
-            
             pot_val /= MAX_POT_VALUE;
     
-            // clamp the potentiometer value between 0 and 1
-            pot_val = pot_val.clamp(0.0, 1.0);
+            // clamp the potentiometer value between 0 and 2^14 - 1
             DISPLAY_LOCK.with_lock(|leddisplay| {
                 leddisplay.display();
             })
         } else {
             prev_pot_val = pot_val;
-            
             pot_val /= MAX_POT_VALUE;
     
-            // clamp the potentiometer value between 0 and 1
-            pot_val = pot_val.clamp(0.0, 1.0);
         }
 
         // determine which value to update based on index.
@@ -358,25 +362,8 @@ fn main() -> ! {
         // XXX Deal with LED display in `LedDisplay::display()` method.
         // turn off the led
         DISPLAY_LOCK.with_lock(|leddisplay| {
-            for pin in leddisplay.led_pins.iter_mut() {
-                pin.set_high().unwrap();
-            }
-            // test code - turn on the LED and show a different color when the mode is changed
-            BUTTON_LOCK.with_lock(|buttons| {
-                leddisplay.led_pins[buttons.current_display_index]
-                    .set_low()
-                    .unwrap()
-            });
-
             // calculate the new cycle values
             leddisplay.calculate_cycle_values(&rgb_values);
-            // rprintln!(
-            //     "Cycle values: {} {} {}",
-            //     leddisplay.led_cycles[0],
-            //     leddisplay.led_cycles[1],
-            //     leddisplay.led_cycles[2],
-            // );
-            //leddisplay.display();
         });
 
         // ******* STEP 4: Block in the display *******
