@@ -94,20 +94,34 @@ impl LedDisplay {
     // Keep doing this until they are all off, and then set the timer
     // for the start of the next frame.
     fn display(&mut self) {
-        rprintln!("THIS IS A TEST: {}", self.led_cycles[0]);
-        self.timer0.start(1_000_000); // 1 million ticks
+        //rprintln!("THIS IS A TEST: {}", self.led_cycles[0]);
+        // turn all of RGB on
+        self.led_pins[0].set_low();
+        self.led_pins[1].set_low();
+        self.led_pins[2].set_low();
+
+        // set up the times when parts of RGB will be turned off
+        rprintln!("RGB: {} {} {}", self.led_cycles[0], self.led_cycles[1], self.led_cycles[2]);
+
+        // determine the smallest value
+        //TBD
+        rprintln!("Smallest value: {}", self.led_cycles[0].min(self.led_cycles[1]));
+
+
+        // set timer to start
+        self.timer0.start(1_000_000); // 1 million ticks is about 1 second
     }
 
     // convert rgb values to cycles
     fn calculate_cycle_values(&mut self, rgb: &hsv::Rgb) {
-        self.led_cycles[0] = (rgb.r * 100.0) as u32;
-        self.led_cycles[0] *= 100;
+        self.led_cycles[0] = (rgb.r * 100.0) as u32; // set up the cycle time
+        //self.led_cycles[0] *= 100; // determine interrupt time
 
-        self.led_cycles[1] = (rgb.g * 100.0) as u32;
-        self.led_cycles[1] *= 100;
+        self.led_cycles[1] = (rgb.g * 100.0) as u32; // set up the cycle time
+        //self.led_cycles[1] *= 100; // determine interrupt time
 
         self.led_cycles[2] = (rgb.b * 100.0) as u32;
-        self.led_cycles[2] *= 100;
+        //self.led_cycles[2] *= 100;
     }
 }
 // =======================================================
@@ -118,7 +132,7 @@ struct Buttons {
     gpiote0: Gpiote,
     current_display_index: usize,    // the current display index
     display_list: [[[u8; 5]; 5]; 3], // a list of 3 displays showing H, S, or V
-    mb2_display: Display,
+    mb2_display: Display,           // the display
 }
 
 impl Buttons {
@@ -131,22 +145,6 @@ impl Buttons {
             display_list: [H_VIEW, S_VIEW, V_VIEW],
             mb2_display
         }
-    }
-
-    fn setup_button_interrupts(&mut self) {
-        self.gpiote0
-            .channel0()
-            .input_pin(&self.buttons[0])
-            .hi_to_lo()
-            .enable_interrupt();
-        self.gpiote0
-            .channel1()
-            .input_pin(&self.buttons[1])
-            .hi_to_lo()
-            .enable_interrupt();
-
-        self.gpiote0.channel0().reset_events();
-        self.gpiote0.channel1().reset_events();
     }
 
     // change the MB2 display
@@ -165,11 +163,6 @@ impl Buttons {
             self.current_display_index = 2;
         }
     }
-
-    // Testing button interrupt
-    fn test_print(&self) {
-        rprintln!("Testing button interrupt");
-    }
 }
 
 // =======================================================
@@ -180,22 +173,22 @@ static BUTTON_LOCK: LockMut<Buttons> = LockMut::new(); // TBD
 
 // =======================================================
 
-// Button interrupt handler
-#[interrupt]
-fn GPIOTE() {
-    rprintln!("Entering interrupt");
-    BUTTON_LOCK.with_lock(|mb2_buttons| {
-        rprintln!("Testing");
-        let back_button_pressed = mb2_buttons.gpiote0.channel0().is_event_triggered();
-        let forward_button_pressed = mb2_buttons.gpiote0.channel1().is_event_triggered();
-        if back_button_pressed || forward_button_pressed {
-            mb2_buttons.test_print();
-        }
+// // Button interrupt handler
+// #[interrupt]
+// fn GPIOTE() {
+//     rprintln!("Entering interrupt");
+//     BUTTON_LOCK.with_lock(|mb2_buttons| {
+//         rprintln!("Testing");
+//         let back_button_pressed = mb2_buttons.gpiote0.channel0().is_event_triggered();
+//         let forward_button_pressed = mb2_buttons.gpiote0.channel1().is_event_triggered();
+//         if back_button_pressed || forward_button_pressed {
+//             mb2_buttons.test_print();
+//         }
 
-        mb2_buttons.gpiote0.channel0().reset_events();
-        mb2_buttons.gpiote0.channel1().reset_events();
-    });
-}
+//         mb2_buttons.gpiote0.channel0().reset_events();
+//         mb2_buttons.gpiote0.channel1().reset_events();
+//     });
+// }
 
 // Timer interrupt handler
 #[interrupt]
@@ -206,6 +199,7 @@ fn TIMER0() {
 
         // This code was moved from the super loop into the handler
         BUTTON_LOCK.with_lock(|buttons| {
+            buttons.change_mb2_display();
             buttons.mb2_display.show(
                 &mut leddisplay.timer0,
                 buttons.display_list[buttons.current_display_index],
@@ -256,7 +250,7 @@ fn main() -> ! {
     // initialize the display
     let display = Display::new(board.display_pins);
     let mut buttons = Buttons::new([back_button.degrade(), forward_button.degrade()], gpiote, display);
-    buttons.setup_button_interrupts();
+    //buttons.setup_button_interrupts();
     BUTTON_LOCK.init(buttons); // move the buttons into the global
 
 
@@ -273,6 +267,8 @@ fn main() -> ! {
         v: 1.0,
     };
 
+    let mut prev_pot_val = 1.0;
+
     // Enable interrupts for the NVIC
     // Requires unsafe block to run
     unsafe {
@@ -286,13 +282,19 @@ fn main() -> ! {
 
     // Main loop
     loop {
-        //asm::wfi();
         // ******* STEP 1: Check for button presses *******
 
         // move to the next state
         // if doing so causes the index to be 3 or more, wrap back to index 0 (H)
         BUTTON_LOCK.with_lock(|buttons| {
             buttons.change_mb2_display();
+            // DISPLAY_LOCK.with_lock(|leddisplay| {
+            //     buttons.mb2_display.show(
+            //         &mut leddisplay.timer0,
+            //         buttons.display_list[buttons.current_display_index],
+            //         100,
+            //     );
+            // })
         });
 
         // ******* STEP 2: Read potentiometer value *******
@@ -300,14 +302,35 @@ fn main() -> ! {
         // Read the potentiometer value and scale it to be between 0 and 1
         let potentiometer_res = saadc.read_channel(&mut saadc_pin).unwrap();
         let mut pot_val: f32 = potentiometer_res.into();
-        pot_val /= MAX_POT_VALUE;
-
-        // clamp the potentiometer value between 0 and 1
-        pot_val = pot_val.clamp(0.0, 1.0);
+        
         
         // TODO - keep previous potentiometer value
         // compare to the new value and determine the difference
         // if the difference is above a certain amount, interrupt
+        let mut pot_val_diff = pot_val - prev_pot_val;
+        
+        if pot_val_diff < 0.0 {
+            pot_val_diff *= -1.0;
+        }
+        rprintln!("Difference in pot values: {}", pot_val_diff);
+        if pot_val_diff > 60.0 {
+            prev_pot_val = pot_val;
+            
+            pot_val /= MAX_POT_VALUE;
+    
+            // clamp the potentiometer value between 0 and 1
+            pot_val = pot_val.clamp(0.0, 1.0);
+            DISPLAY_LOCK.with_lock(|leddisplay| {
+                leddisplay.display();
+            })
+        } else {
+            prev_pot_val = pot_val;
+            
+            pot_val /= MAX_POT_VALUE;
+    
+            // clamp the potentiometer value between 0 and 1
+            pot_val = pot_val.clamp(0.0, 1.0);
+        }
 
         // determine which value to update based on index.
         BUTTON_LOCK.with_lock(|buttons| {
@@ -320,12 +343,12 @@ fn main() -> ! {
             }
         });
 
-        rprintln!(
-            "HSV values: {} {} {}",
-            hsv_values.h,
-            hsv_values.s,
-            hsv_values.v
-        );
+        // rprintln!(
+        //     "HSV values: {} {} {}",
+        //     hsv_values.h,
+        //     hsv_values.s,
+        //     hsv_values.v
+        // );
 
         // ******* STEP 3: Convert HSV values to RGB *******
 
@@ -347,17 +370,19 @@ fn main() -> ! {
 
             // calculate the new cycle values
             leddisplay.calculate_cycle_values(&rgb_values);
-            rprintln!(
-                "Cycle values: {} {} {}",
-                leddisplay.led_cycles[0],
-                leddisplay.led_cycles[1],
-                leddisplay.led_cycles[2],
-            );
+            // rprintln!(
+            //     "Cycle values: {} {} {}",
+            //     leddisplay.led_cycles[0],
+            //     leddisplay.led_cycles[1],
+            //     leddisplay.led_cycles[2],
+            // );
+            //leddisplay.display();
         });
 
         // ******* STEP 4: Block in the display *******
 
         // TBD - show current LED settings
+        
         
 
         // Return to the top of the loop
