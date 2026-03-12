@@ -106,6 +106,19 @@ impl LedDisplay {
         self.led_pins[1].set_low();
         self.led_pins[2].set_low();
 
+        // determine difference in cycle values
+        let next_cycles = match self.next_cycles {
+            Some(cycles) => cycles,
+            None => [0, 0, 0]
+        };
+
+        // compare cycle values
+        if self.led_cycles != next_cycles {
+            rprintln!("Should start interrupt - cycle values don't match");
+            // update the next cycles
+            
+        }
+
         
         // set the LED to a specific color
         for i in 0..3 {
@@ -122,7 +135,7 @@ impl LedDisplay {
         if self.led_pins[0].is_set_high().unwrap() && self.led_pins[1].is_set_high().unwrap() && self.led_pins[2].is_set_high().unwrap() {
             all_set_low = true;
         }
-        rprintln!("All RGB off: {}", all_set_low);
+        //rprintln!("All RGB off: {}", all_set_low);
 
         rprintln!("Cycle count: {}", self.cycles);
         self.cycles += 1;
@@ -131,8 +144,11 @@ impl LedDisplay {
         // TODO - make the interrupt work on an RGB change
         self.timer0.reset_event();
         self.timer0.start(1_000_000);
-        if self.cycles > 100 {
-            rprintln!("Resetting event");
+
+        rprintln!("{:?}", self.led_cycles);
+
+        if self.cycles > 1000 {
+            rprintln!("Returning to main thread");
             self.cycles = 0;
             self.timer0.disable_interrupt();
         } else {
@@ -144,9 +160,9 @@ impl LedDisplay {
     fn calculate_cycle_values(&mut self, hsv: &hsv::Hsv)
     {
         let rgb = hsv.to_rgb();
-        self.led_cycles[0] = rgb.r as u32;
-        self.led_cycles[1] = rgb.g as u32;
-        self.led_cycles[2] = rgb.b as u32;
+        self.led_cycles[0] = (rgb.r * 100.0) as u32;
+        self.led_cycles[1] = (rgb.g * 100.0) as u32;
+        self.led_cycles[2] = (rgb.b * 100.0) as u32;
     }
 }
 // =======================================================
@@ -348,6 +364,8 @@ fn main() -> ! {
         DISPLAY_LOCK.with_lock(|leddisplay| {
             // calculate the new cycle values
             leddisplay.calculate_cycle_values(&hsv_values);
+            leddisplay.display(); // calling the handler here allows the code to briefly return to the main session
+            leddisplay.timer0.reset_event(); // clear events
         });
 
         // ******* STEP 4: Block in the display *******
