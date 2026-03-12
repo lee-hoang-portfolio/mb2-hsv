@@ -73,6 +73,7 @@ const V_VIEW: [[u8; 5]; 5] = [
 // struct for a display
 // this will be shared between the main loop and the interrupt handler
 struct LedDisplay {
+    cycles: u32,
     timer0: Timer<pac::TIMER0>,           // The timer that will interrupt
     led_pins: [Pin<Output<PushPull>>; 3], // The LED pins
     led_cycles: [u32; 3],                 // determine when to turn off the LED.
@@ -83,6 +84,7 @@ impl LedDisplay {
     // Initialize the display
     fn new(pins: [Pin<Output<PushPull>>; 3], timer0: Timer<pac::TIMER0>) -> Self {
         Self {
+            cycles: 0,
             led_pins: pins,
             led_cycles: [0, 0, 0],
             timer0,
@@ -93,7 +95,10 @@ impl LedDisplay {
     // the time when you will turn one or more of them off.
     // Keep doing this until they are all off, and then set the timer
     // for the start of the next frame.
+    //
+    // called inside the interrupt handler
     fn display(&mut self) {
+        // turn off all LEDs
         for pin in self.led_pins.iter_mut() {
             pin.set_high().unwrap();
         }
@@ -106,12 +111,13 @@ impl LedDisplay {
         self.led_pins[2].set_low();
 
         // set up the times when parts of RGB will be turned off
-        rprintln!("RGB: {} {} {}", self.led_cycles[0], self.led_cycles[1], self.led_cycles[2]);
+        rprintln!("Cycle values: {} {} {}", self.led_cycles[0], self.led_cycles[1], self.led_cycles[2]);
         for i in 0..3 {
             // turn the led off after "pin" number of steps
             let mut time_val = self.led_cycles[i] * 100; // this value is in microseconds. set the timer to interrupt after this time. 
-            self.timer0.delay_us(time_val);
-            self.led_pins[i].set_high();
+            //self.timer0.start(time_val);
+            self.led_pins[0].set_high();
+            //self.timer0.reset_event();
             rprintln!("Time val: {}", time_val);
         }
 
@@ -119,14 +125,25 @@ impl LedDisplay {
         //TBD
         rprintln!("Smallest value: {}", self.led_cycles[0].min(self.led_cycles[1]));
 
-
-        // set timer to start
-        
+        rprintln!("Cycle count: {}", self.cycles);
+        // set timer to start next frame
+        self.cycles += 1;
         self.timer0.start(1_000_000); // 1 million ticks is about 1 second
+
+        // after 2000 cycles, start a new frame
+        if self.cycles > 100 {
+            rprintln!("Resetting event");
+            self.timer0.reset_event();
+            self.cycles = 0;
+        }
     }
 
     // convert rgb values to cycles
-    fn calculate_cycle_values(&mut self, rgb: &hsv::Rgb) {
+    fn calculate_cycle_values(&mut self, hsv: &hsv::Hsv)
+    {
+        // convert hsv to rgb
+        let rgb = hsv.to_rgb();
+        rprintln!("RGB after convert: {} {} {}", rgb.r, rgb.g, rgb.b);
         self.led_cycles[0] = (rgb.r * 100.0) as u32; // set up the cycle time
         //self.led_cycles[0] *= 100; // determine interrupt time
 
@@ -208,11 +225,15 @@ static BUTTON_LOCK: LockMut<Buttons> = LockMut::new(); // TBD
 fn TIMER0() {
     // Always start a new timer with time > 0.
     DISPLAY_LOCK.with_lock(|leddisplay| {
+        // start the timer and do things with leds
         leddisplay.display();
 
         // This code was moved from the super loop into the handler
         BUTTON_LOCK.with_lock(|buttons| {
+            // change the display
             buttons.change_mb2_display();
+
+            // show the display
             buttons.mb2_display.show(
                 &mut leddisplay.timer0,
                 buttons.display_list[buttons.current_display_index],
@@ -220,6 +241,7 @@ fn TIMER0() {
             );
         });
 
+        // reset the event
         leddisplay.timer0.reset_event();
 
     }) // end of DISPLAY_LOCK
@@ -249,9 +271,10 @@ fn main() -> ! {
 
     // Set up the struct
     let mut leddisplay = LedDisplay::new(color_pins, timer);
+
     // Enable timer interrupts
     leddisplay.timer0.enable_interrupt();
-    // Get the timer started
+    // Get the timer started 
     leddisplay.display();
     // Move the display into the global
     DISPLAY_LOCK.init(leddisplay);
@@ -321,20 +344,20 @@ fn main() -> ! {
         if pot_val_diff < 0.0 {
             pot_val_diff *= -1.0;
         }
+
+        prev_pot_val = pot_val;
+        pot_val /= MAX_POT_VALUE; // scale the value to be between 0 and 1
         rprintln!("Difference in pot values: {}", pot_val_diff);
-        if pot_val_diff > 60.0 {
-            prev_pot_val = pot_val;
-            pot_val /= MAX_POT_VALUE;
+        // if pot_val_diff > 60.0 {
+        //     prev_pot_val = pot_val;
+        //     pot_val /= MAX_POT_VALUE;
     
-            // clamp the potentiometer value between 0 and 2^14 - 1
-            DISPLAY_LOCK.with_lock(|leddisplay| {
-                leddisplay.display();
-            })
-        } else {
-            prev_pot_val = pot_val;
-            pot_val /= MAX_POT_VALUE;
+        //     // // clamp the potentiometer value between 0 and 2^14 - 1
+        // } else {
+        //     prev_pot_val = pot_val;
+        //     pot_val /= MAX_POT_VALUE;
     
-        }
+        // }
 
         // determine which value to update based on index.
         BUTTON_LOCK.with_lock(|buttons| {
@@ -355,15 +378,11 @@ fn main() -> ! {
         // );
 
         // ******* STEP 3: Convert HSV values to RGB *******
-
-        // Convert HSV to RGB
-        let rgb_values: hsv::Rgb = hsv_values.to_rgb();
-
         // XXX Deal with LED display in `LedDisplay::display()` method.
         // turn off the led
         DISPLAY_LOCK.with_lock(|leddisplay| {
             // calculate the new cycle values
-            leddisplay.calculate_cycle_values(&rgb_values);
+            leddisplay.calculate_cycle_values(&hsv_values);
         });
 
         // ******* STEP 4: Block in the display *******
