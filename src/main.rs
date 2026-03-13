@@ -77,19 +77,37 @@ struct LedDisplay {
     timer0: Timer<pac::TIMER0>,           // The timer that will interrupt
     led_pins: [Pin<Output<PushPull>>; 3], // The LED pins
     led_cycles: [u32; 3],                 // determine when to turn off the LED.
-    next_cycles: Option<[u32; 3]>           // do we have another cycle set? If so, overwrite the current set of cycles
+    next_cycles: Option<[u32; 3]>, // do we have another cycle set? If so, overwrite the current set of cycles
+
+    buttons: [Pin<Input<Floating>>; 2], // back button is the first element, forward button is the second element
+    gpiote0: Gpiote,
+    current_display_index: usize,    // the current display index
+    display_list: [[[u8; 5]; 5]; 3], // a list of 3 displays showing H, S, or V
+    mb2_display: Display,            // the display
 }
 
 // define what functions are available for an LedDisplay
 impl LedDisplay {
     // Initialize the display
-    fn new(pins: [Pin<Output<PushPull>>; 3], timer0: Timer<pac::TIMER0>) -> Self {
+    fn new(
+        pins: [Pin<Output<PushPull>>; 3],
+        timer0: Timer<pac::TIMER0>,
+        mb2_buttons: [Pin<Input<Floating>>; 2],
+        mb2_gpiote: Gpiote,
+        mb2_display: Display,
+    ) -> Self {
         Self {
             cycles: 0,
             led_pins: pins,
             led_cycles: [0, 0, 0],
             timer0,
-            next_cycles: None
+            next_cycles: None,
+
+            buttons: mb2_buttons,
+            gpiote0: mb2_gpiote,
+            current_display_index: 0,
+            display_list: [H_VIEW, S_VIEW, V_VIEW],
+            mb2_display,
         }
     }
 
@@ -109,37 +127,39 @@ impl LedDisplay {
         // determine difference in cycle values
         let next_cycles = match self.next_cycles {
             Some(cycles) => cycles,
-            None => [0, 0, 0]
+            None => [0, 0, 0],
         };
 
         // compare cycle values
         if self.led_cycles != next_cycles {
             rprintln!("Should start interrupt - cycle values don't match");
             // update the next cycles
-            
         }
 
-        
         // set the LED to a specific color
         for i in 0..3 {
             let time_val = self.led_cycles[i] * 100;
-            
+            let intr_time = time_val * 100;
+
+            self.timer0.start(intr_time);
             self.led_pins[i].set_high();
             self.timer0.reset_event();
-            self.timer0.start(time_val);
         }
-        
+
         // determine if all RGB is off
         let mut all_set_low = false;
         // convert pins to push pull to check state
-        if self.led_pins[0].is_set_high().unwrap() && self.led_pins[1].is_set_high().unwrap() && self.led_pins[2].is_set_high().unwrap() {
+        if self.led_pins[0].is_set_high().unwrap()
+            && self.led_pins[1].is_set_high().unwrap()
+            && self.led_pins[2].is_set_high().unwrap()
+        {
             all_set_low = true;
         }
         //rprintln!("All RGB off: {}", all_set_low);
 
         rprintln!("Cycle count: {}", self.cycles);
         self.cycles += 1;
-        
+
         // after 100 cycles, disable the interrupt
         // TODO - make the interrupt work on an RGB change
         self.timer0.reset_event();
@@ -147,7 +167,7 @@ impl LedDisplay {
 
         rprintln!("{:?}", self.led_cycles);
 
-        if self.cycles > 1000 {
+        if self.cycles > 100 {
             rprintln!("Returning to main thread");
             self.cycles = 0;
             self.timer0.disable_interrupt();
@@ -157,35 +177,11 @@ impl LedDisplay {
     }
 
     // convert rgb values to cycles
-    fn calculate_cycle_values(&mut self, hsv: &hsv::Hsv)
-    {
+    fn calculate_cycle_values(&mut self, hsv: &hsv::Hsv) {
         let rgb = hsv.to_rgb();
         self.led_cycles[0] = (rgb.r * 100.0) as u32;
         self.led_cycles[1] = (rgb.g * 100.0) as u32;
         self.led_cycles[2] = (rgb.b * 100.0) as u32;
-    }
-}
-// =======================================================
-// button struct
-// contains both the A and B buttons on the Microbit
-struct Buttons {
-    buttons: [Pin<Input<Floating>>; 2], // back button is the first element, forward button is the second element
-    gpiote0: Gpiote,
-    current_display_index: usize,    // the current display index
-    display_list: [[[u8; 5]; 5]; 3], // a list of 3 displays showing H, S, or V
-    mb2_display: Display,           // the display
-}
-
-impl Buttons {
-    fn new(mb2_buttons: [Pin<Input<Floating>>; 2], mb2_gpiote: Gpiote, mb2_display: Display) -> Self {
-        // initialize the struct
-        Self {
-            buttons: mb2_buttons,
-            gpiote0: mb2_gpiote,
-            current_display_index: 0,
-            display_list: [H_VIEW, S_VIEW, V_VIEW],
-            mb2_display
-        }
     }
 
     // change the MB2 display
@@ -194,7 +190,6 @@ impl Buttons {
             self.current_display_index += 1;
         } else if self.buttons[1].is_low().unwrap() && self.current_display_index == 2 {
             self.current_display_index = 0;
-
         }
 
         // move to the previous state
@@ -206,12 +201,12 @@ impl Buttons {
         }
     }
 }
+// =======================================================
 
 // =======================================================
 // Interrupt variables
 // Share the display between the interrupt handler and the main loop
 static DISPLAY_LOCK: LockMut<LedDisplay> = LockMut::new();
-static BUTTON_LOCK: LockMut<Buttons> = LockMut::new(); // TBD
 
 // =======================================================
 
@@ -224,21 +219,12 @@ fn TIMER0() {
         leddisplay.display();
 
         // This code was moved from the super loop into the handler
-        BUTTON_LOCK.with_lock(|buttons| {
-            // change the display
-            buttons.change_mb2_display();
 
-            // show the display
-            buttons.mb2_display.show(
-                &mut leddisplay.timer0,
-                buttons.display_list[buttons.current_display_index],
-                100,
-            );
-        });
+        // change the display
+        leddisplay.change_mb2_display();
 
         // reset the event
         leddisplay.timer0.reset_event();
-
     }) // end of DISPLAY_LOCK
 }
 
@@ -265,26 +251,26 @@ fn main() -> ! {
     let color_pins = [pin_r.degrade(), pin_g.degrade(), pin_b.degrade()]; // set up the list of pins and use them as generic structs
 
     // Set up the struct
-    let mut leddisplay = LedDisplay::new(color_pins, timer);
-
-    // Enable timer interrupts
-    leddisplay.timer0.enable_interrupt();
-    // Get the timer started 
-    leddisplay.display();
-    // Move the display into the global
-    DISPLAY_LOCK.init(leddisplay);
-
     // Initialize the buttons and GPIOTE
     let back_button = board.buttons.button_a; // right to left: H < S < V
     let forward_button = board.buttons.button_b; // left to right: H > S > V
     let gpiote = Gpiote::new(board.GPIOTE);
-
     // initialize the display
     let display = Display::new(board.display_pins);
-    let mut buttons = Buttons::new([back_button.degrade(), forward_button.degrade()], gpiote, display);
-    //buttons.setup_button_interrupts();
-    BUTTON_LOCK.init(buttons); // move the buttons into the global
+    let mut leddisplay = LedDisplay::new(
+        color_pins,
+        timer,
+        [back_button.degrade(), forward_button.degrade()],
+        gpiote,
+        display,
+    );
 
+    // Enable timer interrupts
+    leddisplay.timer0.enable_interrupt();
+    // Get the timer started
+    leddisplay.display();
+    // Move the display into the global
+    DISPLAY_LOCK.init(leddisplay);
 
     // initialize the SAADC for the potentiometer
     // Docs: https://docs.rs/microbit-v2/0.16.0/microbit/hal/saadc/index.html
@@ -321,8 +307,8 @@ fn main() -> ! {
 
         // move to the next state
         // if doing so causes the index to be 3 or more, wrap back to index 0 (H)
-        BUTTON_LOCK.with_lock(|buttons| {
-            buttons.change_mb2_display();
+        DISPLAY_LOCK.with_lock(|leddisplay| {
+            leddisplay.change_mb2_display();
         });
 
         // ******* STEP 2: Read potentiometer (pot) value *******
@@ -330,25 +316,23 @@ fn main() -> ! {
         // Read the potentiometer value and scale it to be between 0 and 1
         let potentiometer_res = saadc.read_channel(&mut saadc_pin).unwrap();
         let mut pot_val: f32 = potentiometer_res.into(); // convert to floating point
-        
+
         // clamp the potentiometer value to be between 0 and 2^14 - 1
         pot_val = pot_val.clamp(0.0, MAX_POT_VALUE);
         pot_val /= MAX_POT_VALUE; // scale the pot value to be between 0 and 1
 
         //rprintln!("Knob val: {}", pot_val);
 
-        
         // determine which value to update based on index.
-        BUTTON_LOCK.with_lock(|buttons| {
-            rprintln!("Display index: {}", buttons.current_display_index);
-            if buttons.current_display_index == 0 {
+        DISPLAY_LOCK.with_lock(|leddisplay| {
+            rprintln!("Display index: {}", leddisplay.current_display_index);
+            if leddisplay.current_display_index == 0 {
                 hsv_values.h = pot_val;
-            } else if buttons.current_display_index == 1 {
+            } else if leddisplay.current_display_index == 1 {
                 hsv_values.s = pot_val;
-            } else if buttons.current_display_index == 2 {
+            } else if leddisplay.current_display_index == 2 {
                 hsv_values.v = pot_val;
             }
-        
         });
 
         rprintln!(
@@ -364,12 +348,17 @@ fn main() -> ! {
         DISPLAY_LOCK.with_lock(|leddisplay| {
             // calculate the new cycle values
             leddisplay.calculate_cycle_values(&hsv_values);
+            leddisplay.mb2_display.show(
+                &mut leddisplay.timer0,
+                leddisplay.display_list[leddisplay.current_display_index],
+                100,
+            );
             leddisplay.display(); // calling the handler here allows the code to briefly return to the main session
             leddisplay.timer0.reset_event(); // clear events
         });
 
         // ******* STEP 4: Block in the display *******
-
+        // show the display
         // TBD - show current LED settings
         // Return to the top of the loop
     }
