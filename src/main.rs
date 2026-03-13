@@ -28,7 +28,7 @@ use microbit::{
 // embedded-hal crate: For button and LED pin state
 // https://docs.rs/embedded-hal/1.0.0/embedded_hal/
 use embedded_hal::{
-    //delay::DelayNs,
+    delay::DelayNs,
     digital::{InputPin, OutputPin},
 };
 
@@ -122,36 +122,28 @@ impl LedDisplay {
             None => [0, 0, 0],
         };
 
-        // compare cycle values
-        if self.led_cycles != next_cycles {
-            //rprintln!("Should start interrupt - cycle values don't match");
-            // update the next cycles
-        }
+        rprintln!("{:?}", self.led_cycles);
 
         // set the LED to a specific color
         for i in 0..3 {
             let time_val = self.led_cycles[i] * 100;
             let intr_time = time_val * 100;
             self.timer0.start(intr_time);
-            self.led_pins[2].set_high();
+            self.led_pins[i].set_high();
             self.timer0.reset_event();
         }
 
         rprintln!("Cycle count: {}", self.cycles);
         self.cycles += 1;
 
-        // after 100 cycles, disable the interrupt
         // TODO - make the interrupt work on an RGB change
         self.timer0.reset_event();
         self.timer0.start(1_000_000);
 
         if self.cycles > 10 {
-        //if self.led_cycles != next_cycles {
             self.cycles = 0;
-            self.timer0.disable_interrupt();
-        } else {
-            self.timer0.enable_interrupt();
         }
+
     }
 
     // convert rgb values to cycles
