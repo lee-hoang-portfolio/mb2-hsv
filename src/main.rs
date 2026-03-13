@@ -83,8 +83,6 @@ struct LedDisplay {
     led_pins: [Pin<Output<PushPull>>; 3], // The LED pins
     led_cycles: [u32; 3],                 // determine when to turn off the LED.
     next_cycles: Option<[u32; 3]>, // do we have another cycle set? If so, overwrite the current set of cycles
-
-    //gpiote0: Gpiote,
 }
 
 // define what functions are available for an LedDisplay
@@ -93,7 +91,6 @@ impl LedDisplay {
     fn new(
         pins: [Pin<Output<PushPull>>; 3],
         timer0: Timer<pac::TIMER0>,
-        //mb2_gpiote: Gpiote,
 
     ) -> Self {
         Self {
@@ -102,7 +99,6 @@ impl LedDisplay {
             led_cycles: [0, 0, 0],
             timer0,
             next_cycles: None,
-            //gpiote0: mb2_gpiote,
 
         }
     }
