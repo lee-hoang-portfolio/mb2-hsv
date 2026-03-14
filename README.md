@@ -13,15 +13,17 @@ To run in debug mode, use `cargo embed`.
 
 I created a program that uses a breadboard, an LED, a potentiometer, and a microbit to show off the HSV color space. The user can turn the potentiometer to adjust the color of the LED. 
 
-More information TBD
+Pressing the buttons on the microbit allows the user to switch between adjusting hue, saturation, or value depending on the letter shown.
 
 ## How it went
 
-I found this project challenging due to two primary factors:
+I found this project challenging due to three primary factors:
 
 1) Setting up the wires/hardware.
 
 2) Understanding timer interrupts.
+
+3) LED timing.
 
 More information TBD
 
