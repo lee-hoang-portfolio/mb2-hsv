@@ -122,16 +122,79 @@ impl LedDisplay {
             None => [0, 0, 0],
         };
 
-        rprintln!("{:?}", self.led_cycles);
-
+        
         // set the LED to a specific color
+        
+        // this step will find the smallest, second smallest, and largest values
+        let mut smallest = 10000;
+        let mut largest = 0;
+        let mut middle = 0;
+
+        // indices of values - use to determine which pin to set high/low
+        let mut small_index = 0;
+        let mut med_index = 0;
+        let mut large_index = 0;
+
         for i in 0..3 {
-            let time_val = self.led_cycles[i] * 100;
-            let intr_time = time_val * 100;
-            self.timer0.start(intr_time);
-            self.led_pins[i].set_high();
-            self.timer0.reset_event();
+            // find the smallest value and index
+            if smallest > self.led_cycles[i] {
+                smallest = self.led_cycles[i];
+                small_index = i;
+            }
+
+            // find the largest value and index
+            if largest < self.led_cycles[i] {
+                largest = self.led_cycles[i];
+                large_index = i;
+            }
         }
+
+        // locate the middle value
+        // at this point, we know the smallest index and the largest index (index values are 0, 1, and 2)
+        if small_index == 0 && large_index == 1 {
+            med_index = 2;
+        } else if small_index == 0 && large_index == 2 {
+            med_index = 1;
+        } else if small_index == 1 && large_index == 0 {
+            med_index = 2;
+        } else if small_index == 1 && large_index == 2 {
+            med_index = 0;
+        } else if small_index == 2 && large_index == 0 {
+            med_index = 1;
+        } else if small_index == 2 && large_index == 1 {
+            med_index = 0;
+        }
+
+        middle = self.led_cycles[med_index];
+        
+        // at this point, set up the timing
+        // turn off the first value
+        if self.cycles > self.led_cycles[small_index] {
+            self.timer0.start(self.led_cycles[small_index]);
+            self.led_pins[small_index].set_high();
+        }
+        // set timer to interrupt
+        self.timer0.start(self.led_cycles[small_index]*100);
+
+        // calculate the next cycle value
+        let mut med_cycle_val = self.led_cycles[med_index] - self.led_cycles[small_index];
+        if self.cycles > med_cycle_val {
+            self.timer0.start(med_cycle_val);
+            self.led_pins[med_index].set_high();
+        }
+
+        // interrupt 
+        self.timer0.start(med_cycle_val*100);
+
+        // calculate the last cycle value and set when to turn off the LED
+        let mut large_cycle_val = self.led_cycles[large_index] - self.led_cycles[med_index];
+        if self.cycles > large_cycle_val {
+            self.timer0.start(large_cycle_val);
+            self.led_pins[large_index].set_high();
+        }
+
+        // 
+        self.timer0.start(large_cycle_val*100);
 
         rprintln!("Cycle count: {}", self.cycles);
         self.cycles += 1;
@@ -140,7 +203,7 @@ impl LedDisplay {
         self.timer0.reset_event();
         self.timer0.start(1_000_000);
 
-        if self.cycles > 10 {
+        if self.cycles > 100 {
             self.cycles = 0;
         }
 
@@ -285,13 +348,6 @@ fn main() -> ! {
         } else if current_display_index == 2 {
             hsv_values.v = pot_val;
         }
-
-        rprintln!(
-            "HSV values: {} {} {}",
-            hsv_values.h,
-            hsv_values.s,
-            hsv_values.v
-        );
 
         // ******* STEP 3: Convert HSV values to RGB *******
         // XXX Deal with LED display in `LedDisplay::display()` method.
