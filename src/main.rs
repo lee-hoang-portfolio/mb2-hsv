@@ -67,11 +67,15 @@ const V_VIEW: [[u8; 5]; 5] = [
     [0u8, 0u8, 1u8, 0u8, 0u8],
 ];
 
+// list of MB2 display states
 const LED_DISPLAY_LIST: [[[u8; 5]; 5]; 3] = [H_VIEW, S_VIEW, V_VIEW];
 
 // Define the max potentiometer value.
 // It is about (2^14) - 1
 const MAX_POT_VALUE: f32 = 16383.0;
+
+// max number of steps for brightness
+const MAX_BRIGHTNESS_STEPS: u32 = 100;
 // =======================================================
 // struct definitions
 
@@ -193,8 +197,10 @@ impl LedDisplay {
             self.led_pins[large_index].set_high();
         }
 
-        // 
+        // interrupt
         self.timer0.start(large_cycle_val*100);
+
+        // by this time, all LEDs are off
 
         rprintln!("Cycle count: {}", self.cycles);
         self.cycles += 1;
