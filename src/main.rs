@@ -192,7 +192,7 @@ impl LedDisplay {
 
         // by this time, all LEDs are off
 
-        rprintln!("Cycle count: {}", self.cycles);
+        //rprintln!("Cycle count: {}", self.cycles);
         self.cycles += 1;
 
         // TODO - make the interrupt work on an RGB change
@@ -208,6 +208,7 @@ impl LedDisplay {
     // convert rgb values to cycles
     fn calculate_cycle_values(&mut self, hsv: &hsv::Hsv) {
         let rgb = hsv.to_rgb();
+        rprintln!("{} {} {}", rgb.r, rgb.g, rgb.b);
         self.led_cycles[0] = (rgb.r * 100.0) as u32;
         self.led_cycles[1] = (rgb.g * 100.0) as u32;
         self.led_cycles[2] = (rgb.b * 100.0) as u32;

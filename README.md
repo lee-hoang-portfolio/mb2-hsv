@@ -17,15 +17,15 @@ Pressing the buttons on the microbit allows the user to switch between adjusting
 
 ## How it went
 
-I found this project challenging due to three primary factors:
+I found this project challenging due to two primary factors:
 
-1) Setting up the wires/hardware.
+1) Understanding timer interrupts.
 
-2) Understanding timer interrupts.
+2) LED timing.
 
-3) LED timing.
+I took the time to assemble the wires and made sure I had them in the correct configuration before working on the bulk of the code.
 
-More information TBD
+Once I had the basics implemented (board display, potentiometer reading, lighting the LED) and began working on the project in earnest, the difficulty of understanding the timer interrupts and LED timing became apparent. 
 
 ## Acknowledgements
 
