@@ -28,7 +28,6 @@ use microbit::{
 // embedded-hal crate: For button and LED pin state
 // https://docs.rs/embedded-hal/1.0.0/embedded_hal/
 use embedded_hal::{
-    delay::DelayNs,
     digital::{InputPin, OutputPin},
 };
 
@@ -120,11 +119,11 @@ impl LedDisplay {
         self.led_pins[1].set_low();
         self.led_pins[2].set_low();
 
-        // determine difference in cycle values
-        let next_cycles = match self.next_cycles {
-            Some(cycles) => cycles,
-            None => [0, 0, 0],
-        };
+        // // determine difference in cycle values
+        // let next_cycles = match self.next_cycles {
+        //     Some(cycles) => cycles,
+        //     None => [0, 0, 0],
+        // };
 
         
         // set the LED to a specific color
@@ -132,7 +131,7 @@ impl LedDisplay {
         // this step will find the smallest, second smallest, and largest values
         let mut smallest = 10000;
         let mut largest = 0;
-        let mut middle = 0;
+        
 
         // indices of values - use to determine which pin to set high/low
         let mut small_index = 0;
@@ -169,7 +168,7 @@ impl LedDisplay {
             med_index = 0;
         }
 
-        middle = self.led_cycles[med_index];
+        //let middle = self.led_cycles[med_index];
         
         // at this point, set up the timing
         // turn off the first value
@@ -181,7 +180,7 @@ impl LedDisplay {
         self.timer0.start(self.led_cycles[small_index]*100);
 
         // calculate the next cycle value
-        let mut med_cycle_val = self.led_cycles[med_index] - self.led_cycles[small_index];
+        let med_cycle_val = self.led_cycles[med_index] - self.led_cycles[small_index];
         if self.cycles > med_cycle_val {
             self.timer0.start(med_cycle_val);
             self.led_pins[med_index].set_high();
@@ -191,7 +190,7 @@ impl LedDisplay {
         self.timer0.start(med_cycle_val*100);
 
         // calculate the last cycle value and set when to turn off the LED
-        let mut large_cycle_val = self.led_cycles[large_index] - self.led_cycles[med_index];
+        let large_cycle_val = self.led_cycles[large_index] - self.led_cycles[med_index];
         if self.cycles > large_cycle_val {
             self.timer0.start(large_cycle_val);
             self.led_pins[large_index].set_high();
@@ -209,7 +208,7 @@ impl LedDisplay {
         self.timer0.reset_event();
         self.timer0.start(1_000_000);
 
-        if self.cycles > 100 {
+        if self.cycles > MAX_BRIGHTNESS_STEPS {
             self.cycles = 0;
         }
 
@@ -299,7 +298,7 @@ fn main() -> ! {
     };
 
     // set up the previous potentiometer value
-    let mut prev_pot_val = 16383.0;
+    //let prev_pot_val = 16383.0;
 
     // Enable interrupts for the NVIC
     // Requires unsafe block to run
