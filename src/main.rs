@@ -85,7 +85,6 @@ struct LedDisplay {
     timer0: Timer<pac::TIMER0>,           // The timer that will interrupt
     led_pins: [Pin<Output<PushPull>>; 3], // The LED pins
     led_cycles: [u32; 3],                 // determine when to turn off the LED.
-    next_cycles: Option<[u32; 3]>, // do we have another cycle set? If so, overwrite the current set of cycles
 }
 
 // define what functions are available for an LedDisplay
@@ -101,7 +100,6 @@ impl LedDisplay {
             led_pins: pins,
             led_cycles: [0, 0, 0],
             timer0,
-            next_cycles: None,
 
         }
     }
@@ -118,13 +116,6 @@ impl LedDisplay {
         self.led_pins[0].set_low();
         self.led_pins[1].set_low();
         self.led_pins[2].set_low();
-
-        // // determine difference in cycle values
-        // let next_cycles = match self.next_cycles {
-        //     Some(cycles) => cycles,
-        //     None => [0, 0, 0],
-        // };
-
         
         // set the LED to a specific color
         
