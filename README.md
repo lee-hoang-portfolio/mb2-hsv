@@ -13,7 +13,7 @@ To run in debug mode, use `cargo embed`.
 
 I created a program that uses a breadboard, an LED, a potentiometer, and a microbit to show off the HSV color space. The user can turn the potentiometer to adjust the color of the LED. 
 
-Pressing the buttons on the microbit allows the user to switch between adjusting hue, saturation, or value depending on the letter shown.
+Pressing the buttons on the microbit allows the user to switch between adjusting hue, saturation, or value depending on the letter shown. This part is not done yet, but it may be done in the future.
 
 ## How it went
 
@@ -25,12 +25,13 @@ I found this project challenging due to two primary factors:
 
 I took the time to assemble the wires and made sure I had them in the correct configuration before working on the bulk of the code.
 
-Once I had the basics implemented (board display, potentiometer reading, lighting the LED) and began working on the project in earnest, the difficulty of understanding the timer interrupts and LED timing became apparent. 
+Once I had the basics implemented (board display, potentiometer reading, lighting the LED) and began working on the project in earnest, the difficulty of understanding the timer interrupts and LED timing became apparent. I eventually overcame the timer interrupt issues, but I did not have enough time to implement/debug the LED timing issues I was having. Future work may remedy these issues.
 
 ## Acknowledgements
 
 - Documentation for the `microbit-v2`, `hsv`, and other crates. Links can be found in the source code. 
-- Classmates from the Winter 2026 Rust Embedded class for help on setup and expected program behavior.
+- Classmates from the Winter 2026 Rust Embedded class for help on setup, advice, and expected program behavior.
+- [Rust reference](https://doc.rust-lang.org/reference/introduction.html) - general Rust syntax.
 - [MB2 Discovery Book](https://docs.rust-embedded.org/discovery-mb2/index.html) - provided starting points for Microbit v2 code.
 - [pdx-cs-rust-embedded](https://github.com/pdx-cs-rust-embedded) - provided starting points for setting up the project.
 - [Rust Cargo book](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html) - used to specify git repo for dependencies.
